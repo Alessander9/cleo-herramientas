@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cleo-Herramientas - Compresor Inteligente de Fotos</title>
+  <meta name="description" content="Cleo-Herramientas: Comprime y optimiza hasta 500 fotos simultáneamente en tu navegador. Ultra rápido, privado, con Web Workers y sin pérdida perceptible de calidad.">
+  
+  <!-- PWA & Mobile Meta Tags -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#07090e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Cleo-Herramientas">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="icon" type="image/png" href="icons/favicon.png">
+
+  <!-- Fonts: Inter & Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+  
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="css/styles.css">
+  <!-- JSZip CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+  <!-- Ambient background glow elements -->
+  <div class="ambient-glow glow-1"></div>
+  <div class="ambient-glow glow-2"></div>
+
+  <div class="app-container">
+    
+    <!-- TOP NAVIGATION BAR -->
+    <header class="navbar">
+      <div class="nav-brand">
+        <img src="icons/logo.png" alt="Cleo-Herramientas" class="brand-avatar">
+        <div class="brand-headings">
+          <div class="brand-title-row">
+            <span class="brand-name">Cleo</span>
+            <span class="brand-badge-pill">HERRAMIENTAS</span>
+          </div>
+          <span class="brand-tagline">Compresor de Fotos Multi-hilo</span>
+        </div>
+      </div>
+
+      <div class="nav-center-widget">
+        <div class="thread-capsule" id="workerBadge" title="Hilos de CPU activos con Web Workers">
+          <span class="live-dot"></span>
+          <span id="workerCountText">6 hilos paralelos activos</span>
+        </div>
+      </div>
+
+      <div class="nav-actions">
+        <button class="nav-action-btn" id="btnShortcuts" title="Atajos de teclado">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="4" width="20" height="16" rx="2"/>
+            <path d="M6 8h.001M10 8h.001M14 8h.001M18 8h.001M6 12h.001M10 12h.001M14 12h.001M18 12h.001M7 16h10"/>
+          </svg>
+          <span>Atajos</span>
+        </button>
+
+        <button class="nav-action-btn" id="btnProTools" title="Ajustes de optimización">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+          <span>Opciones</span>
+        </button>
+
+        <button class="nav-action-btn btn-install-app" id="btnInstallPwa" title="Instalar en escritorio o móvil">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <span>Instalar App</span>
+        </button>
+
+        <button class="nav-btn-zip" id="btnDownloadZip" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <span>Descargar ZIP</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- MAIN BODY -->
+    <main class="main-content">
+
+      <!-- INTERACTIVE SMART DROPZONE -->
+      <section class="drop-zone-card" id="dropZone">
+        <!-- Background animated beam -->
+        <div class="drop-beam"></div>
+
+        <!-- Empty State Inside Dropzone -->
+        <div class="drop-hero-state" id="dropContentEmpty">
+          <div class="mascot-preview-wrap">
+            <img src="icons/logo.png" alt="Cleo Mascot" class="mascot-floating-img">
+            <div class="upload-icon-badge">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+          </div>
+
+          <h1 class="drop-hero-title">
+            Arrastra tus fotos <span class="text-gradient-purple">o una carpeta completa</span>
+          </h1>
+          <p class="drop-hero-desc">
+            Soporta hasta <strong>500 imágenes simultáneas</strong>. Compresión rápida, multi-hilo y 100% privada en tu navegador.
+          </p>
+
+          <div class="drop-buttons-row">
+            <button class="btn-primary-glow" id="btnBrowseFiles">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Explorar Archivos
+            </button>
+
+            <button class="btn-secondary-glass" id="btnBrowseFolder">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+              Cargar Carpeta
+            </button>
+
+            <button class="btn-secondary-glass" id="btnPasteClipboard">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              Pegar <span class="kbd-badge">Ctrl + V</span>
+            </button>
+          </div>
+
+          <div class="drop-features-badges">
+            <div class="feature-tag"><span class="check-icon">✓</span> JPG, PNG, WebP, AVIF</div>
+            <div class="feature-tag"><span class="check-icon">✓</span> Procesamiento Local Privado</div>
+            <div class="feature-tag"><span class="check-icon">✓</span> 0% Lag / Bloqueo de Pantalla</div>
+          </div>
+        </div>
+
+        <!-- Compact Drop Strip (Visible when items exist) -->
+        <div class="drop-strip-compact" id="dropCompactStrip" style="display: none;">
+          <div class="compact-left-info">
+            <div class="pulse-upload-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+            </div>
+            <span>Suelta más fotos aquí o presiona <span class="kbd-badge">Ctrl+V</span> para añadir</span>
+          </div>
+          <div class="compact-btn-group">
+            <button class="btn-compact-add" id="btnCompactAddFiles">+ Añadir fotos</button>
+            <button class="btn-compact-add" id="btnCompactAddFolder">📁 Carpeta</button>
+          </div>
+        </div>
+
+        <!-- Hidden file inputs -->
+        <input type="file" id="fileInput" multiple accept="image/*" style="display: none;">
+        <input type="file" id="folderInput" webkitdirectory directory multiple style="display: none;">
+      </section>
+
+      <!-- STREAMLINED CONTROL & STATS DECK -->
+      <section class="control-deck">
+        
+        <!-- Left Options Group -->
+        <div class="deck-controls-left">
+          
+          <!-- Format Selector Pill Group -->
+          <div class="deck-group">
+            <label class="deck-label">Formato:</label>
+            <div class="format-pill-group" id="formatPillGroup">
+              <button class="pill-btn active" data-format="webp">WebP</button>
+              <button class="pill-btn" data-format="jpeg">JPG</button>
+              <button class="pill-btn" data-format="png">PNG</button>
+              <button class="pill-btn" data-format="avif">AVIF</button>
+              <button class="pill-btn" data-format="original">Original</button>
+            </div>
+            <!-- Hidden native select for state synchronization -->
+            <select id="outputFormat" style="display: none;">
+              <option value="webp" selected>WebP</option>
+              <option value="jpeg">JPG</option>
+              <option value="png">PNG</option>
+              <option value="avif">AVIF</option>
+              <option value="original">Original</option>
+            </select>
+          </div>
+
+          <!-- Quality Slider with Quick Presets -->
+          <div class="deck-group quality-deck-group">
+            <div class="deck-label-row">
+              <label class="deck-label">Calidad:</label>
+              <span class="quality-display-badge" id="qualityValueBadge">80%</span>
+            </div>
+            <div class="slider-track-wrap">
+              <input type="range" id="qualitySlider" min="20" max="100" value="80" step="1" class="deck-slider">
+            </div>
+          </div>
+
+          <!-- Dimension Preset -->
+          <div class="deck-group">
+            <label class="deck-label">Escala:</label>
+            <select id="resizeMode" class="deck-select">
+              <option value="original" selected>Original 100%</option>
+              <option value="scale_75">75% Reducido</option>
+              <option value="scale_50">50% Media resolución</option>
+              <option value="max_1920">Máx 1920px (FHD)</option>
+              <option value="max_1280">Máx 1280px (Web)</option>
+              <option value="max_800">Máx 800px (Thumbnails)</option>
+            </select>
+          </div>
+
+        </div>
+
+        <!-- Right Summary Stats & Trigger Button -->
+        <div class="deck-controls-right">
+          
+          <div class="deck-stats-capsule">
+            <div class="stat-count-chip">
+              <span class="dot-purple"></span>
+              <span id="statCount">0 fotos</span>
+            </div>
+
+            <div class="stat-weight-chip">
+              <span id="statOriginalSize" class="text-muted">0 B</span>
+              <span class="arrow-sym">→</span>
+              <span id="statOptimizedSize" class="text-cyan font-bold">0 B</span>
+              <span class="badge-saving-pill" id="statSaving">0%</span>
+            </div>
+          </div>
+
+          <div class="deck-btn-group">
+            <button class="btn-deck-compress" id="btnCompressAll" disabled>
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+              </svg>
+              <span>Comprimir Todo</span>
+            </button>
+
+            <button class="btn-deck-clear" id="btnClearAll" title="Vaciar lista" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </button>
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- DATA GALLERY / TABLE SECTION -->
+      <section class="gallery-section">
+        
+        <!-- Filter Bar & View Switcher -->
+        <div class="gallery-header">
+          
+          <div class="search-field">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input type="text" id="searchInput" placeholder="Buscar foto por nombre...">
+          </div>
+
+          <div class="tab-filters">
+            <button class="tab-filter-btn active" data-filter="all">Todas (<span id="tabCountAll">0</span>)</button>
+            <button class="tab-filter-btn" data-filter="done">Listas (<span id="tabCountDone">0</span>)</button>
+            <button class="tab-filter-btn" data-filter="high-saving">+80% Ahorro (<span id="tabCountHighSaving">0</span>)</button>
+          </div>
+
+          <!-- View Mode Switcher: Table vs Grid Cards -->
+          <div class="view-switch-group">
+            <button class="view-btn active" id="btnViewTable" title="Vista Tabla detallada">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="8" y1="6" x2="21" y2="6"></line>
+                <line x1="8" y1="12" x2="21" y2="12"></line>
+                <line x1="8" y1="18" x2="21" y2="18"></line>
+                <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                <line x1="3" y1="18" x2="3.01" y2="18"></line>
+              </svg>
+            </button>
+            <button class="view-btn" id="btnViewGrid" title="Vista Cuadrícula de fotos">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7"></rect>
+                <rect x="14" y="3" width="7" height="7"></rect>
+                <rect x="14" y="14" width="7" height="7"></rect>
+                <rect x="3" y="14" width="7" height="7"></rect>
+              </svg>
+            </button>
+          </div>
+
+        </div>
+
+        <!-- TABLE VIEW CONTAINER -->
+        <div class="view-container table-view" id="tableViewContainer">
+          <table class="cleo-table" id="imagesTable">
+            <thead>
+              <tr>
+                <th class="th-chk"><input type="checkbox" id="selectAllCheckbox" class="cleo-chk"></th>
+                <th class="th-num">#</th>
+                <th class="th-thumb">Foto</th>
+                <th class="th-name">Nombre y Dimensiones</th>
+                <th class="th-orig">Original</th>
+                <th class="th-opt">Optimizado</th>
+                <th class="th-saving">Ahorro</th>
+                <th class="th-status">Estado</th>
+                <th class="th-actions">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- GRID VIEW CONTAINER (Cards) -->
+        <div class="view-container grid-view" id="gridViewContainer" style="display: none;">
+          <div class="cards-grid" id="cardsGrid">
+            <!-- Dynamically populated cards -->
+          </div>
+        </div>
+
+        <!-- Empty State Placeholder -->
+        <div class="empty-state-wrap" id="emptyState">
+          <div class="empty-cat-badge">
+            <img src="icons/logo.png" alt="Cleo" class="empty-mascot-img">
+          </div>
+          <h3>Ninguna foto añadida aún</h3>
+          <p>Arrastra tus imágenes arriba o pega capturas de pantalla con <span class="kbd-badge">Ctrl+V</span></p>
+        </div>
+
+        <!-- Live Batch Compression Progress Bar -->
+        <div class="batch-progress-deck" id="batchProgressContainer" style="display: none;">
+          <div class="progress-meta">
+            <span class="progress-title-text" id="batchProgressText">Comprimiendo fotos: 0 / 0</span>
+            <span class="progress-percent-text" id="batchProgressPercent">0%</span>
+          </div>
+          <div class="progress-outer-track">
+            <div class="progress-fill-beam" id="batchProgressFill" style="width: 0%;"></div>
+          </div>
+        </div>
+
+      </section>
+
+    </main>
+  </div>
+
+  <!-- COMPARISON MODAL (Interactive Split Screen) -->
+  <div class="modal-backdrop" id="compareModal" style="display: none;">
+    <div class="modal-window compare-window">
+      <div class="modal-title-bar">
+        <div class="modal-title-info">
+          <h3>Comparativa Antes vs Después</h3>
+          <span class="modal-sub">Arrastra el deslizador central para ver la nitidez y calidad</span>
+        </div>
+        <button class="modal-close-icon" id="btnCompareClose">&times;</button>
+      </div>
+
+      <div class="modal-content-viewer">
+        <div class="split-comparison-box" id="comparisonViewer">
+          <div class="split-layer layer-orig">
+            <img id="compareImgOriginal" alt="Original">
+            <span class="layer-tag orig-tag" id="compareBadgeOriginal">Original (1.4 MB)</span>
+          </div>
+          <div class="split-layer layer-opt" id="compareOptimizedLayer">
+            <img id="compareImgOptimized" alt="Optimizado">
+            <span class="layer-tag opt-tag" id="compareBadgeOptimized">Optimizado (220 KB, -84%)</span>
+          </div>
+          <div class="split-handle-bar" id="compareSliderHandle">
+            <div class="handle-line-beam"></div>
+            <div class="handle-circular-button">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l-7-7 7-7zm8 0v14l7-7-7-7z"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-bottom-bar">
+        <button class="btn-primary-glow" id="btnCompareDownload">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Descargar Esta Foto
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PRO OPTIONS MODAL -->
+  <div class="modal-backdrop" id="proToolsModal" style="display: none;">
+    <div class="modal-window">
+      <div class="modal-title-bar">
+        <h3>Opciones Pro de Rendimiento</h3>
+        <button class="modal-close-icon" id="btnProToolsClose">&times;</button>
+      </div>
+      <div class="modal-content-body">
+        <div class="pro-setting-item">
+          <div>
+            <div class="setting-heading">Eliminar metadatos EXIF / GPS</div>
+            <div class="setting-desc">Elimina geolocalización, cámara y datos ocultos (Mayor privacidad y hasta 15% menos peso).</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="chkStripExif" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="pro-setting-item">
+          <div>
+            <div class="setting-heading">Sufijo del archivo descargado</div>
+            <div class="setting-desc">Añade "_opt" o tu texto preferido al nombre final.</div>
+          </div>
+          <input type="text" id="txtFileSuffix" class="setting-input-text" value="_opt">
+        </div>
+
+        <div class="pro-setting-item">
+          <div>
+            <div class="setting-heading">Optimización Automática al Soltar</div>
+            <div class="setting-desc">Comienza la compresión en cuanto agregues las fotos.</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="chkAutoCompress" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="pro-setting-item">
+          <div>
+            <div class="setting-heading">Hilos concurrentes (Web Workers)</div>
+            <div class="setting-desc">Procesamiento ultra-rápido en paralelo con los núcleos de tu procesador.</div>
+          </div>
+          <select id="selWorkersCount" class="deck-select" style="width: 140px;">
+            <option value="4">4 Hilos</option>
+            <option value="6" selected>6 Hilos (Recomendado)</option>
+            <option value="8">8 Hilos</option>
+            <option value="12">12 Hilos</option>
+            <option value="16">16 Hilos (Turbo)</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-bottom-bar">
+        <button class="btn-primary-glow" id="btnSaveProSettings" style="width: 100%;">Guardar Ajustes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SHORTCUTS MODAL -->
+  <div class="modal-backdrop" id="shortcutsModal" style="display: none;">
+    <div class="modal-window">
+      <div class="modal-title-bar">
+        <h3>Atajos de Teclado</h3>
+        <button class="modal-close-icon" id="btnShortcutsClose">&times;</button>
+      </div>
+      <div class="modal-content-body shortcuts-stack">
+        <div class="shortcut-box">
+          <span>Pegar imágenes desde el portapapeles</span>
+          <span class="kbd-badge">Ctrl + V</span>
+        </div>
+        <div class="shortcut-box">
+          <span>Abrir explorador de archivos</span>
+          <span class="kbd-badge">Ctrl + O</span>
+        </div>
+        <div class="shortcut-box">
+          <span>Comprimir todas las imágenes</span>
+          <span class="kbd-badge">Ctrl + Enter</span>
+        </div>
+        <div class="shortcut-box">
+          <span>Descargar ZIP con fotos optimizadas</span>
+          <span class="kbd-badge">Ctrl + S</span>
+        </div>
+        <div class="shortcut-box">
+          <span>Cerrar diálogos modales</span>
+          <span class="kbd-badge">Esc</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- INSTALL GUIDE MODAL -->
+  <div class="modal-backdrop" id="installGuideModal" style="display: none;">
+    <div class="modal-window">
+      <div class="modal-title-bar">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <img src="icons/logo.png" alt="Cleo" class="modal-avatar-mini">
+          <h3>Instalar Cleo-Herramientas</h3>
+        </div>
+        <button class="modal-close-icon" id="btnInstallGuideClose">&times;</button>
+      </div>
+      <div class="modal-content-body">
+        <p style="font-size: 0.88rem; color: var(--text-secondary); margin-bottom: 16px;">
+          Instala Cleo-Herramientas como app nativa en tu escritorio o celular para usarla sin conexión:
+        </p>
+
+        <div class="install-steps-list">
+          <div class="install-step-card">
+            <div class="step-num-badge">1</div>
+            <div>
+              <strong>En Chrome / Edge (PC o Mac):</strong>
+              <div class="text-sub">Haz clic en el icono <strong>⊕</strong> o <strong>💻</strong> a la derecha de la barra de direcciones.</div>
+            </div>
+          </div>
+
+          <div class="install-step-card">
+            <div class="step-num-badge">2</div>
+            <div>
+              <strong>En Android (Chrome):</strong>
+              <div class="text-sub">Pulsa el menú de 3 puntos <strong>⋮</strong> y elige <strong>"Instalar aplicación"</strong>.</div>
+            </div>
+          </div>
+
+          <div class="install-step-card">
+            <div class="step-num-badge">3</div>
+            <div>
+              <strong>En iPhone / iPad (Safari):</strong>
+              <div class="text-sub">Toca el botón Compartir y pulsa <strong>"Añadir a pantalla de inicio"</strong>.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-bottom-bar">
+        <button class="btn-primary-glow" id="btnTriggerNativeInstall" style="width: 100%;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Instalar Ahora
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/compressor.js"></script>
+  <script src="js/test-runner.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
