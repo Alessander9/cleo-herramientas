@@ -80,3 +80,14 @@ window.runOptiPicTests = async function(count = 10) {
     }, 500);
   });
 };
+
+window.testZipExport = async function() {
+  console.log('🧪 Probando generación y empaquetado ZIP...');
+  const btn = document.getElementById('btnDownloadZip');
+  if (btn && !btn.disabled) {
+    btn.click();
+    console.log('✅ Descarga de ZIP ejecutada con éxito.');
+  } else {
+    console.warn('⚠️ El botón de descarga ZIP no está activo o no hay fotos procesadas.');
+  }
+};

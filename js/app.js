@@ -207,22 +207,29 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
   // DRAG & DROP + IMPORT (Files & Recursive Folders)
   // =========================================================================
-  ['dragenter', 'dragover'].forEach(eventName => {
-    window.addEventListener(eventName, (e) => {
-      e.preventDefault();
-      dropZone.classList.add('drag-over');
-    }, false);
-  });
+  let dragCounter = 0;
+  window.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    dragCounter++;
+    dropZone.classList.add('drag-over');
+  }, false);
 
-  ['dragleave', 'drop'].forEach(eventName => {
-    window.addEventListener(eventName, (e) => {
-      e.preventDefault();
+  window.addEventListener('dragover', (e) => {
+    e.preventDefault();
+  }, false);
+
+  window.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    dragCounter--;
+    if (dragCounter <= 0) {
+      dragCounter = 0;
       dropZone.classList.remove('drag-over');
-    }, false);
-  });
+    }
+  }, false);
 
   window.addEventListener('drop', async (e) => {
     e.preventDefault();
+    dragCounter = 0;
     dropZone.classList.remove('drag-over');
 
     const dt = e.dataTransfer;
@@ -264,7 +271,19 @@ document.addEventListener('DOMContentLoaded', () => {
   async function traverseFileTree(item) {
     return new Promise((resolve) => {
       if (item.isFile) {
-        item.file(file => resolve([file]), () => resolve([]));
+        item.file(file => {
+          if (item.fullPath) {
+            try {
+              Object.defineProperty(file, 'relativePath', {
+                value: item.fullPath.replace(/^\//, ''),
+                writable: true
+              });
+            } catch (e) {
+              file.relativePath = item.fullPath.replace(/^\//, '');
+            }
+          }
+          resolve([file]);
+        }, () => resolve([]));
       } else if (item.isDirectory) {
         const dirReader = item.createReader();
         const entriesList = [];
@@ -378,11 +397,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const newItems = validFiles.map((file, idx) => {
       const id = 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9) + '_' + idx;
       const previewUrl = URL.createObjectURL(file);
+      const relativePath = file.webkitRelativePath || file.relativePath || file.name;
       
       return {
         id,
         file,
         name: file.name,
+        relativePath,
         size: file.size,
         origWidth: 0,
         origHeight: 0,
@@ -408,16 +429,47 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function handleSettingChange() {
+    if (state.settings.autoCompress && state.items.length > 0 && !state.isProcessing) {
+      state.items.forEach(it => {
+        it.status = 'pending';
+      });
+      renderGallery();
+      startCompressionBatch();
+    }
+  }
+
   // Settings
   resizeMode.addEventListener('change', (e) => {
     state.settings.resizeMode = e.target.value;
+    handleSettingChange();
   });
+
+  if (outputFormat) {
+    outputFormat.addEventListener('change', (e) => {
+      state.settings.format = e.target.value;
+      if (formatPillGroup) {
+        formatPillGroup.querySelectorAll('.pill-btn').forEach(p => {
+          if (p.getAttribute('data-format') === e.target.value) {
+            p.classList.add('active');
+          } else {
+            p.classList.remove('active');
+          }
+        });
+      }
+      handleSettingChange();
+    });
+  }
 
   qualitySlider.addEventListener('input', (e) => {
     const val = e.target.value;
     qualityValueBadge.textContent = `${val}%`;
     state.settings.quality = parseInt(val, 10) / 100;
     updateSliderBackground(val);
+  });
+
+  qualitySlider.addEventListener('change', () => {
+    handleSettingChange();
   });
 
   searchInput.addEventListener('input', (e) => {
@@ -444,6 +496,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // COMPRESSION EXECUTION
   // =========================================================================
   btnCompressAll.addEventListener('click', () => {
+    // If all items are done, force re-compression of all items
+    const allDone = state.items.length > 0 && state.items.every(it => it.status === 'done');
+    if (allDone) {
+      state.items.forEach(it => {
+        it.status = 'pending';
+      });
+      renderGallery();
+    }
     startCompressionBatch();
   });
 
@@ -461,6 +521,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.isProcessing = false;
       btnCompressAll.disabled = false;
       batchProgressContainer.style.display = 'none';
+      updateStats();
       return;
     }
 
@@ -497,16 +558,29 @@ document.addEventListener('DOMContentLoaded', () => {
     updateUI();
   }
 
-  // Clear all
+  // Clear all or selected
   btnClearAll.addEventListener('click', () => {
     if (state.items.length === 0) return;
-    if (confirm('¿Deseas vaciar la lista de imágenes?')) {
-      state.items.forEach(it => {
-        if (it.previewUrl) URL.revokeObjectURL(it.previewUrl);
-        if (it.optimizedUrl) URL.revokeObjectURL(it.optimizedUrl);
-      });
-      state.items = [];
-      updateUI();
+
+    const selectedItems = state.items.filter(it => it.selected);
+    if (selectedItems.length > 0 && selectedItems.length < state.items.length) {
+      if (confirm(`¿Deseas eliminar las ${selectedItems.length} fotos seleccionadas?`)) {
+        selectedItems.forEach(it => {
+          if (it.previewUrl) URL.revokeObjectURL(it.previewUrl);
+          if (it.optimizedUrl) URL.revokeObjectURL(it.optimizedUrl);
+        });
+        state.items = state.items.filter(it => !it.selected);
+        updateUI();
+      }
+    } else {
+      if (confirm('¿Deseas vaciar toda la lista de imágenes?')) {
+        state.items.forEach(it => {
+          if (it.previewUrl) URL.revokeObjectURL(it.previewUrl);
+          if (it.optimizedUrl) URL.revokeObjectURL(it.optimizedUrl);
+        });
+        state.items = [];
+        updateUI();
+      }
     }
   });
 
@@ -514,30 +588,70 @@ document.addEventListener('DOMContentLoaded', () => {
   // DOWNLOAD ZIP (JSZip)
   // =========================================================================
   btnDownloadZip.addEventListener('click', async () => {
+    if (state.items.length === 0) {
+      alert('No hay fotos para descargar.');
+      return;
+    }
+
+    // If compression is still processing or there are pending items, complete them all first!
+    if (state.isProcessing || state.items.some(it => it.status !== 'done' && it.status !== 'error')) {
+      btnDownloadZip.disabled = true;
+      btnDownloadZip.innerHTML = `<div class="spinner-ring"></div><span>Comprimiendo todas las fotos...</span>`;
+
+      if (!state.isProcessing) {
+        await startCompressionBatch();
+      } else {
+        // Wait until active background batch finishes
+        while (state.isProcessing) {
+          const done = state.items.filter(it => it.status === 'done').length;
+          btnDownloadZip.innerHTML = `<div class="spinner-ring"></div><span>Comprimiendo (${done}/${state.items.length})...</span>`;
+          await new Promise(r => setTimeout(r, 200));
+        }
+      }
+    }
+
     const doneItems = state.items.filter(it => it.status === 'done' && it.optimizedBlob);
     if (doneItems.length === 0) {
-      alert('No hay fotos optimizadas listas para descargar.');
+      alert('No se encontraron fotos optimizadas listas para exportar.');
+      updateStats();
       return;
     }
 
     btnDownloadZip.disabled = true;
-    btnDownloadZip.innerHTML = `<div class="spinner-ring"></div><span>Creando ZIP...</span>`;
+    btnDownloadZip.innerHTML = `<div class="spinner-ring"></div><span>Empaquetando ${doneItems.length} fotos...</span>`;
 
     try {
       const zip = new JSZip();
       const suffix = state.settings.fileSuffix || '';
+      const usedPaths = new Map();
 
-      doneItems.forEach(item => {
-        const ext = TurboCompressor.getExtension(item.result.mimeType);
-        const baseName = item.name.substring(0, item.name.lastIndexOf('.')) || item.name;
-        const finalName = `${baseName}${suffix}${ext}`;
-        zip.file(finalName, item.optimizedBlob);
+      doneItems.forEach((item, idx) => {
+        const ext = TurboCompressor.getExtension(item.result ? item.result.mimeType : 'image/jpeg');
+        const rawPath = item.relativePath || item.name || `foto_${idx + 1}`;
+        const lastDot = rawPath.lastIndexOf('.');
+        const basePath = lastDot !== -1 ? rawPath.substring(0, lastDot) : rawPath;
+        let finalPath = `${basePath}${suffix}${ext}`;
+
+        // Ensure unique path in ZIP to prevent overwriting identical names
+        const lowerKey = finalPath.toLowerCase();
+        if (usedPaths.has(lowerKey)) {
+          const count = usedPaths.get(lowerKey) + 1;
+          usedPaths.set(lowerKey, count);
+          finalPath = `${basePath}${suffix}_(${count})${ext}`;
+        } else {
+          usedPaths.set(lowerKey, 1);
+        }
+
+        zip.file(finalPath, item.optimizedBlob);
       });
 
       const content = await zip.generateAsync({
         type: 'blob',
         compression: 'DEFLATE',
         compressionOptions: { level: 6 }
+      }, (metadata) => {
+        const percent = Math.round(metadata.percent);
+        btnDownloadZip.innerHTML = `<div class="spinner-ring"></div><span>Empaquetando ZIP ${percent}%...</span>`;
       });
 
       const url = URL.createObjectURL(content);
@@ -560,12 +674,13 @@ document.addEventListener('DOMContentLoaded', () => {
         </svg>
         <span>Descargar ZIP (${doneItems.length})</span>
       `;
+      updateStats();
     }
   });
 
   function downloadSingleItem(item) {
     if (!item.optimizedBlob) return;
-    const ext = TurboCompressor.getExtension(item.result.mimeType);
+    const ext = TurboCompressor.getExtension(item.result ? item.result.mimeType : 'image/jpeg');
     const baseName = item.name.substring(0, item.name.lastIndexOf('.')) || item.name;
     const finalName = `${baseName}${state.settings.fileSuffix || ''}${ext}`;
 
@@ -602,6 +717,10 @@ document.addEventListener('DOMContentLoaded', () => {
       dropContentEmpty.style.display = 'none';
       dropCompactStrip.style.display = 'flex';
       dropZone.style.borderStyle = 'solid';
+    }
+
+    if (selectAllCheckbox) {
+      selectAllCheckbox.checked = count > 0 && state.items.every(it => it.selected);
     }
 
     updateStats();
@@ -641,12 +760,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     btnCompressAll.disabled = count === 0 || state.isProcessing;
     btnClearAll.disabled = count === 0 || state.isProcessing;
-    btnDownloadZip.disabled = doneCount === 0;
+    btnDownloadZip.disabled = count === 0;
     
-    if (doneCount > 0) {
-      btnDownloadZip.querySelector('span').textContent = `Descargar ZIP (${doneCount})`;
-    } else {
-      btnDownloadZip.querySelector('span').textContent = `Descargar ZIP`;
+    const zipBtnSpan = btnDownloadZip.querySelector('span');
+    if (zipBtnSpan) {
+      if (state.isProcessing) {
+        zipBtnSpan.textContent = `Comprimiendo (${doneCount}/${count})`;
+      } else if (doneCount > 0) {
+        zipBtnSpan.textContent = `Descargar ZIP (${doneCount})`;
+      } else {
+        zipBtnSpan.textContent = `Descargar ZIP`;
+      }
     }
 
     emptyState.style.display = count === 0 ? 'flex' : 'none';
@@ -679,8 +803,6 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       cardsGrid.innerHTML = filtered.map((item, index) => createCardHtml(item, index + 1)).join('');
     }
-
-    attachGalleryEventListeners();
   }
 
   function createTableRowHtml(item, num) {
@@ -760,6 +882,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return `
       <div class="photo-card" data-id="${item.id}">
         <div class="card-img-wrap">
+          <input type="checkbox" class="cleo-chk row-chk card-chk" data-id="${item.id}" ${item.selected ? 'checked' : ''}>
           <img src="${item.previewUrl}" alt="${item.name}" loading="lazy">
           ${savingBadge}
         </div>
@@ -841,7 +964,6 @@ document.addEventListener('DOMContentLoaded', () => {
             </button>
           </div>
         `;
-        attachGalleryEventListeners(row);
       }
     } else {
       const card = cardsGrid.querySelector(`.photo-card[data-id="${item.id}"]`);
@@ -849,46 +971,63 @@ document.addEventListener('DOMContentLoaded', () => {
         const newCard = document.createElement('div');
         newCard.innerHTML = createCardHtml(item);
         card.replaceWith(newCard.firstElementChild);
-        attachGalleryEventListeners();
       }
     }
   }
 
-  function attachGalleryEventListeners(parent = document) {
-    parent.querySelectorAll('.row-chk').forEach(chk => {
-      chk.addEventListener('change', (e) => {
-        const id = e.target.getAttribute('data-id');
-        const item = state.items.find(it => it.id === id);
-        if (item) item.selected = e.target.checked;
-      });
-    });
+  // Unified Event Delegation for Table and Grid
+  function handleGalleryAction(e) {
+    const target = e.target;
+    
+    // Checkbox change
+    const chk = target.closest('.row-chk');
+    if (chk && (e.type === 'change' || target === chk)) {
+      const id = chk.getAttribute('data-id');
+      const item = state.items.find(it => it.id === id);
+      if (item) item.selected = chk.checked;
 
-    parent.querySelectorAll('.btn-del-action').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = btn.getAttribute('data-id');
-        deleteSingleItem(id);
-      });
-    });
+      if (selectAllCheckbox) {
+        selectAllCheckbox.checked = state.items.length > 0 && state.items.every(it => it.selected);
+      }
+      return;
+    }
 
-    parent.querySelectorAll('.btn-dl-item').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = btn.getAttribute('data-id');
-        const item = state.items.find(it => it.id === id);
-        if (item) downloadSingleItem(item);
-      });
-    });
+    if (e.type !== 'click') return;
 
-    parent.querySelectorAll('.btn-compare-item').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = btn.getAttribute('data-id');
-        const item = state.items.find(it => it.id === id);
-        if (item) openCompareModal(item);
-      });
-    });
+    // Delete button
+    const btnDel = target.closest('.btn-del-action');
+    if (btnDel) {
+      e.stopPropagation();
+      const id = btnDel.getAttribute('data-id');
+      deleteSingleItem(id);
+      return;
+    }
+
+    // Download single button
+    const btnDl = target.closest('.btn-dl-item');
+    if (btnDl) {
+      e.stopPropagation();
+      const id = btnDl.getAttribute('data-id');
+      const item = state.items.find(it => it.id === id);
+      if (item) downloadSingleItem(item);
+      return;
+    }
+
+    // Compare button
+    const btnComp = target.closest('.btn-compare-item');
+    if (btnComp) {
+      e.stopPropagation();
+      const id = btnComp.getAttribute('data-id');
+      const item = state.items.find(it => it.id === id);
+      if (item) openCompareModal(item);
+      return;
+    }
   }
+
+  ['click', 'change'].forEach(evtType => {
+    if (tableViewContainer) tableViewContainer.addEventListener(evtType, handleGalleryAction);
+    if (gridViewContainer) gridViewContainer.addEventListener(evtType, handleGalleryAction);
+  });
 
   // =========================================================================
   // COMPARISON MODAL
@@ -903,8 +1042,10 @@ document.addEventListener('DOMContentLoaded', () => {
     compareBadgeOriginal.textContent = `Original (${TurboCompressor.formatBytes(item.size)})`;
     compareBadgeOptimized.textContent = `Optimizado (${TurboCompressor.formatBytes(item.optimizedSize)}, -${item.savingPercent}%)`;
 
-    setCompareSliderPosition(50);
     compareModal.style.display = 'flex';
+    requestAnimationFrame(() => {
+      setCompareSliderPosition(50);
+    });
   }
 
   function setCompareSliderPosition(percent) {
@@ -913,13 +1054,22 @@ document.addEventListener('DOMContentLoaded', () => {
     compareOptimizedLayer.style.width = `${clamped}%`;
     
     const containerWidth = comparisonViewer.offsetWidth;
-    compareImgOptimized.style.width = `${containerWidth}px`;
+    if (containerWidth > 0) {
+      compareImgOptimized.style.width = `${containerWidth}px`;
+    }
   }
+
+  window.addEventListener('resize', () => {
+    if (compareModal && compareModal.style.display !== 'none' && currentCompareItem) {
+      setCompareSliderPosition(50);
+    }
+  });
 
   let isDraggingCompare = false;
 
   function onCompareMove(e) {
     if (!isDraggingCompare) return;
+    if (e.cancelable) e.preventDefault();
     const rect = comparisonViewer.getBoundingClientRect();
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const offset = clientX - rect.left;
@@ -937,8 +1087,8 @@ document.addEventListener('DOMContentLoaded', () => {
   comparisonViewer.addEventListener('touchstart', (e) => {
     isDraggingCompare = true;
     onCompareMove(e);
-  });
-  window.addEventListener('touchmove', onCompareMove);
+  }, { passive: false });
+  window.addEventListener('touchmove', onCompareMove, { passive: false });
   window.addEventListener('touchend', () => { isDraggingCompare = false; });
 
   btnCompareClose.addEventListener('click', () => {
@@ -956,6 +1106,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // PRO TOOLS & SHORTCUTS MODALS
   // =========================================================================
   btnProTools.addEventListener('click', () => {
+    chkStripExif.checked = state.settings.stripExif;
+    txtFileSuffix.value = state.settings.fileSuffix;
+    chkAutoCompress.checked = state.settings.autoCompress;
+    selWorkersCount.value = String(state.settings.workers);
     proToolsModal.style.display = 'flex';
   });
   btnProToolsClose.addEventListener('click', () => {
@@ -994,7 +1148,7 @@ document.addEventListener('DOMContentLoaded', () => {
       fileInput.click();
     } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
-      startCompressionBatch();
+      btnCompressAll.click();
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
       if (!btnDownloadZip.disabled) {
         e.preventDefault();

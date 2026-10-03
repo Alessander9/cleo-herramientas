@@ -108,15 +108,29 @@ class TurboCompressor {
   static async loadImage(file) {
     if (typeof createImageBitmap === 'function') {
       try {
-        const bitmap = await createImageBitmap(file);
+        const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
         return {
           source: bitmap,
           width: bitmap.width,
           height: bitmap.height,
-          cleanup: () => bitmap.close()
+          cleanup: () => {
+            if (bitmap && typeof bitmap.close === 'function') bitmap.close();
+          }
         };
       } catch (e) {
-        // Fallback to Image element
+        try {
+          const bitmap = await createImageBitmap(file);
+          return {
+            source: bitmap,
+            width: bitmap.width,
+            height: bitmap.height,
+            cleanup: () => {
+              if (bitmap && typeof bitmap.close === 'function') bitmap.close();
+            }
+          };
+        } catch (err) {
+          // Fallback to Image element
+        }
       }
     }
 
@@ -131,7 +145,7 @@ class TurboCompressor {
           cleanup: () => URL.revokeObjectURL(url)
         });
       };
-      img.onerror = (err) => {
+      img.onerror = () => {
         URL.revokeObjectURL(url);
         reject(new Error('No se pudo decodificar la imagen'));
       };
@@ -155,49 +169,107 @@ class TurboCompressor {
 
     const mimeType = TurboCompressor.getMimeType(format, file.type);
     const loaded = await TurboCompressor.loadImage(file);
-    const { width, height } = TurboCompressor.calculateDimensions(loaded.width, loaded.height, resizeMode);
 
-    // Create Canvas
-    let canvas;
-    let ctx;
-    
-    if (typeof OffscreenCanvas !== 'undefined') {
-      canvas = new OffscreenCanvas(width, height);
-      ctx = canvas.getContext('2d', { alpha: mimeType !== 'image/jpeg' });
-    } else {
-      canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      ctx = canvas.getContext('2d', { alpha: mimeType !== 'image/jpeg' });
-    }
+    try {
+      const { width, height } = TurboCompressor.calculateDimensions(loaded.width, loaded.height, resizeMode);
 
-    // High quality scaling settings
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
+      // Create Canvas
+      let canvas;
+      let ctx;
+      
+      if (typeof OffscreenCanvas !== 'undefined') {
+        canvas = new OffscreenCanvas(width, height);
+        ctx = canvas.getContext('2d', { alpha: mimeType !== 'image/jpeg' });
+      } else {
+        canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        ctx = canvas.getContext('2d', { alpha: mimeType !== 'image/jpeg' });
+      }
 
-    // If JPEG, paint white background to avoid black background on PNG transparency
-    if (mimeType === 'image/jpeg') {
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0, 0, width, height);
-    }
+      if (!ctx) {
+        throw new Error('No se pudo inicializar el contexto de renderizado 2D');
+      }
 
-    ctx.drawImage(loaded.source, 0, 0, width, height);
-    loaded.cleanup();
+      // High quality scaling settings
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
 
-    let outputBlob;
+      // If JPEG, paint white background to avoid black background on PNG transparency
+      if (mimeType === 'image/jpeg') {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
+      }
 
-    if (mode === 'targetSize' && mimeType !== 'image/png') {
-      // Binary search quality to achieve target weight
-      let minQ = 0.05;
-      let maxQ = 0.98;
-      let bestBlob = null;
-      let iterations = 0;
+      ctx.drawImage(loaded.source, 0, 0, width, height);
 
-      while (minQ <= maxQ && iterations < 6) {
-        iterations++;
-        const currentQ = (minQ + maxQ) / 2;
-        let blob;
+      let outputBlob;
+
+      if (mode === 'targetSize' && mimeType !== 'image/png') {
+        // Binary search quality to achieve target weight
+        let minQ = 0.05;
+        let maxQ = 0.98;
+        let bestBlob = null;
+        let iterations = 0;
+
+        while (minQ <= maxQ && iterations < 6) {
+          iterations++;
+          const currentQ = (minQ + maxQ) / 2;
+          let blob;
+          if (canvas.convertToBlob) {
+            blob = await canvas.convertToBlob({ type: mimeType, quality: currentQ });
+          } else {
+            blob = await new Promise(res => canvas.toBlob(res, mimeType, currentQ));
+          }
+
+          if (!blob) break;
+          bestBlob = blob;
+
+          if (blob.size > targetSizeBytes) {
+            maxQ = currentQ - 0.08;
+          } else if (blob.size < targetSizeBytes * 0.85) {
+            minQ = currentQ + 0.08;
+          } else {
+            break; // Close enough
+          }
+        }
+        outputBlob = bestBlob;
+      } else {
+        // Standard Quality percentage
+        const finalQ = mimeType === 'image/png' ? undefined : quality;
         if (canvas.convertToBlob) {
+          outputBlob = await canvas.convertToBlob({ type: mimeType, quality: finalQ });
+        } else {
+          outputBlob = await new Promise(res => canvas.toBlob(res, mimeType, finalQ));
+        }
+      }
+
+      // Fallback if conversion failed
+      if (!outputBlob) {
+        throw new Error('Error al codificar imagen');
+      }
+
+      const savingBytes = Math.max(0, file.size - outputBlob.size);
+      const savingPercent = file.size > 0 ? Math.round(((file.size - outputBlob.size) / file.size) * 100) : 0;
+
+      return {
+        blob: outputBlob,
+        originalSize: file.size,
+        optimizedSize: outputBlob.size,
+        savingBytes: savingBytes,
+        savingPercent: savingPercent,
+        width: width,
+        height: height,
+        origWidth: loaded.width,
+        origHeight: loaded.height,
+        mimeType: mimeType
+      };
+    } finally {
+      if (loaded && typeof loaded.cleanup === 'function') {
+        loaded.cleanup();
+      }
+    }
+  }
           blob = await canvas.convertToBlob({ type: mimeType, quality: currentQ });
         } else {
           blob = await new Promise(res => canvas.toBlob(res, mimeType, currentQ));
@@ -274,6 +346,9 @@ class TurboCompressor {
 
           item.status = 'done';
           item.result = result;
+          if (item.optimizedUrl) {
+            URL.revokeObjectURL(item.optimizedUrl);
+          }
           item.optimizedBlob = result.blob;
           item.optimizedSize = result.optimizedSize;
           item.savingPercent = result.savingPercent;
