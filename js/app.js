@@ -621,6 +621,9 @@ document.addEventListener('DOMContentLoaded', () => {
     btnDownloadZip.innerHTML = `<div class="spinner-ring"></div><span>Empaquetando ${doneItems.length} fotos...</span>`;
 
     try {
+      if (typeof JSZip === 'undefined') {
+        throw new Error('La librería JSZip no está disponible. Verifica tu conexión a internet.');
+      }
       const zip = new JSZip();
       const suffix = state.settings.fileSuffix || '';
       const usedPaths = new Map();
@@ -874,9 +877,31 @@ document.addEventListener('DOMContentLoaded', () => {
   function createCardHtml(item, num) {
     let optText = '-';
     let savingBadge = '';
+    let statusOrActions = '';
+
     if (item.status === 'done') {
       optText = TurboCompressor.formatBytes(item.optimizedSize);
       savingBadge = `<span class="card-saving-badge">-${item.savingPercent}%</span>`;
+      statusOrActions = `
+        <button class="btn-icon-action btn-compare-item" data-id="${item.id}" title="Comparar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+          </svg>
+        </button>
+        <button class="btn-icon-action btn-dl-item" data-id="${item.id}" title="Descargar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+        </button>
+      `;
+    } else if (item.status === 'processing') {
+      statusOrActions = `<span class="status-capsule status-processing"><div class="spinner-ring"></div> Comprimiendo</span>`;
+    } else if (item.status === 'error') {
+      statusOrActions = `<span class="status-capsule status-error">Error</span>`;
+    } else {
+      statusOrActions = `<span class="status-capsule status-pending">Pendiente</span>`;
     }
 
     return `
@@ -893,20 +918,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <span class="text-cyan font-bold">${optText}</span>
           </div>
           <div class="card-actions-row">
-            ${item.status === 'done' ? `
-              <button class="btn-icon-action btn-compare-item" data-id="${item.id}" title="Comparar">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-                </svg>
-              </button>
-              <button class="btn-icon-action btn-dl-item" data-id="${item.id}" title="Descargar">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="7 10 12 15 17 10"/>
-                  <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-              </button>
-            ` : '<span class="status-capsule status-pending">Pendiente</span>'}
+            ${statusOrActions}
             <button class="btn-icon-action btn-del-action" data-id="${item.id}" title="Eliminar">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -964,13 +976,17 @@ document.addEventListener('DOMContentLoaded', () => {
             </button>
           </div>
         `;
+      } else if (item.status === 'error') {
+        statusCell.innerHTML = `<span class="status-capsule status-error">Error</span>`;
       }
     } else {
       const card = cardsGrid.querySelector(`.photo-card[data-id="${item.id}"]`);
-      if (card && item.status === 'done') {
+      if (card) {
         const newCard = document.createElement('div');
         newCard.innerHTML = createCardHtml(item);
-        card.replaceWith(newCard.firstElementChild);
+        if (newCard.firstElementChild) {
+          card.replaceWith(newCard.firstElementChild);
+        }
       }
     }
   }

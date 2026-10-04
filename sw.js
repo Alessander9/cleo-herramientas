@@ -2,7 +2,7 @@
  * Cleo-Herramientas - Service Worker (Offline Support & PWA Cache)
  */
 
-const CACHE_NAME = 'cleo-herramientas-v2.4';
+const CACHE_NAME = 'cleo-herramientas-v2.6';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -47,39 +47,24 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Event - Stale-while-revalidate or Cache-first
+// Fetch Event - Network-first (fallback to cache when offline)
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  if (!event.request.url.startsWith('http')) return;
 
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, networkResponse);
-            });
-          }
-        }).catch(() => {});
-        return cachedResponse;
+    fetch(event.request).then((networkResponse) => {
+      if (networkResponse && networkResponse.status === 200) {
+        const copy = networkResponse.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {});
       }
-
-      return fetch(event.request).then((networkResponse) => {
-        if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
-          return networkResponse;
-        }
-
-        const responseToCache = networkResponse.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseToCache);
-        });
-
-        return networkResponse;
-      }).catch(() => {
-        if (event.request.headers.get('accept') && event.request.headers.get('accept').includes('text/html')) {
-          return caches.match('./index.html');
-        }
-      });
-    })
+      return networkResponse;
+    }).catch(() =>
+      caches.match(event.request).then((cached) => {
+        if (cached) return cached;
+        if (event.request.mode === 'navigate') return caches.match('./index.html');
+        return new Response('', { status: 504 });
+      })
+    )
   );
 });

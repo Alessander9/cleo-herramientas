@@ -1,5 +1,5 @@
 /**
- * OptiPic TURBO - High Throughput Multi-threaded Image Compression Engine
+ * Cleo-Herramientas - High Throughput Multi-threaded Image Compression Engine
  * Supports up to 500+ images concurrently without freezing UI
  */
 
@@ -129,7 +129,7 @@ class TurboCompressor {
             }
           };
         } catch (err) {
-          // Fallback to Image element
+          // Fallback to Image element below
         }
       }
     }
@@ -167,7 +167,7 @@ class TurboCompressor {
       onProgress = () => {}
     } = options;
 
-    const mimeType = TurboCompressor.getMimeType(format, file.type);
+    let mimeType = TurboCompressor.getMimeType(format, file.type);
     const loaded = await TurboCompressor.loadImage(file);
 
     try {
@@ -203,7 +203,7 @@ class TurboCompressor {
 
       ctx.drawImage(loaded.source, 0, 0, width, height);
 
-      let outputBlob;
+      let outputBlob = null;
 
       if (mode === 'targetSize' && mimeType !== 'image/png') {
         // Binary search quality to achieve target weight
@@ -215,11 +215,15 @@ class TurboCompressor {
         while (minQ <= maxQ && iterations < 6) {
           iterations++;
           const currentQ = (minQ + maxQ) / 2;
-          let blob;
-          if (canvas.convertToBlob) {
-            blob = await canvas.convertToBlob({ type: mimeType, quality: currentQ });
-          } else {
-            blob = await new Promise(res => canvas.toBlob(res, mimeType, currentQ));
+          let blob = null;
+          try {
+            if (canvas.convertToBlob) {
+              blob = await canvas.convertToBlob({ type: mimeType, quality: currentQ });
+            } else {
+              blob = await new Promise(res => canvas.toBlob(res, mimeType, currentQ));
+            }
+          } catch (e) {
+            break;
           }
 
           if (!blob) break;
@@ -237,6 +241,27 @@ class TurboCompressor {
       } else {
         // Standard Quality percentage
         const finalQ = mimeType === 'image/png' ? undefined : quality;
+        try {
+          if (canvas.convertToBlob) {
+            outputBlob = await canvas.convertToBlob({ type: mimeType, quality: finalQ });
+          } else {
+            outputBlob = await new Promise(res => canvas.toBlob(res, mimeType, finalQ));
+          }
+        } catch (e) {
+          // Fallback if browser doesn't support the specific mime type (e.g. AVIF on older engines)
+          mimeType = 'image/jpeg';
+          if (canvas.convertToBlob) {
+            outputBlob = await canvas.convertToBlob({ type: mimeType, quality: finalQ });
+          } else {
+            outputBlob = await new Promise(res => canvas.toBlob(res, mimeType, finalQ));
+          }
+        }
+      }
+
+      // If outputBlob is null (e.g. browser canvas toBlob returned null for avif/webp), fallback to jpeg
+      if (!outputBlob && mimeType !== 'image/jpeg') {
+        mimeType = 'image/jpeg';
+        const finalQ = quality;
         if (canvas.convertToBlob) {
           outputBlob = await canvas.convertToBlob({ type: mimeType, quality: finalQ });
         } else {
@@ -244,7 +269,7 @@ class TurboCompressor {
         }
       }
 
-      // Fallback if conversion failed
+      // Final validation
       if (!outputBlob) {
         throw new Error('Error al codificar imagen');
       }
@@ -269,54 +294,6 @@ class TurboCompressor {
         loaded.cleanup();
       }
     }
-  }
-          blob = await canvas.convertToBlob({ type: mimeType, quality: currentQ });
-        } else {
-          blob = await new Promise(res => canvas.toBlob(res, mimeType, currentQ));
-        }
-
-        if (!blob) break;
-        bestBlob = blob;
-
-        if (blob.size > targetSizeBytes) {
-          maxQ = currentQ - 0.08;
-        } else if (blob.size < targetSizeBytes * 0.85) {
-          minQ = currentQ + 0.08;
-        } else {
-          break; // Close enough
-        }
-      }
-      outputBlob = bestBlob;
-    } else {
-      // Standard Quality percentage
-      const finalQ = mimeType === 'image/png' ? undefined : quality;
-      if (canvas.convertToBlob) {
-        outputBlob = await canvas.convertToBlob({ type: mimeType, quality: finalQ });
-      } else {
-        outputBlob = await new Promise(res => canvas.toBlob(res, mimeType, finalQ));
-      }
-    }
-
-    // Fallback if conversion failed
-    if (!outputBlob) {
-      throw new Error('Error al codificar imagen');
-    }
-
-    const savingBytes = Math.max(0, file.size - outputBlob.size);
-    const savingPercent = file.size > 0 ? Math.round(((file.size - outputBlob.size) / file.size) * 100) : 0;
-
-    return {
-      blob: outputBlob,
-      originalSize: file.size,
-      optimizedSize: outputBlob.size,
-      savingBytes: savingBytes,
-      savingPercent: savingPercent,
-      width: width,
-      height: height,
-      origWidth: loaded.width,
-      origHeight: loaded.height,
-      mimeType: mimeType
-    };
   }
 
   /**
