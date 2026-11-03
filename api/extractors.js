@@ -327,6 +327,9 @@ async function runSocialBrowserExtract(targetUrl, { onImage, signal } = {}) {
           await new Promise(r => setTimeout(r, 500));
           const domImgs = await page.evaluate(extractDomImages);
           domImgs.forEach(reportCandidate);
+          if (i >= 1 && domImgs.length === 0 && /instagram\.com/i.test(visitUrl)) {
+            break;
+          }
         } catch (e) {
           break;
         }
@@ -344,37 +347,29 @@ async function runSocialBrowserExtract(targetUrl, { onImage, signal } = {}) {
     // Si es un perfil de Instagram con restricción de edad (+18, ej. bares/restaurantes como @laplaza_artesanal)
     // y no devolvió fotos sin sesión, buscar automáticamente su página espejo oficial en Facebook (Meta)
     if (igUsername && bestByAsset.size === 0 && !(signal && signal.aborted)) {
-      const searchName = discoveredBusinessName || igUsername.replace(/[._-]+/g, ' ');
-      let fbPageUrl = null;
-      try {
-        const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`site:facebook.com "${searchName}"`)}`;
-        await page.goto(ddgUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-        const rawHrefs = await page.evaluate(() =>
-          Array.from(document.querySelectorAll('a.result__a, a[href*="facebook.com"]')).map(a => a.href)
-        );
-        for (const raw of rawHrefs) {
-          let candidate = raw;
-          try {
-            const u = new URL(raw);
-            if (u.searchParams.get('uddg')) candidate = decodeURIComponent(u.searchParams.get('uddg'));
-          } catch (e) {}
-          const m = candidate.match(/^https?:\/\/(?:www\.|m\.|es-la\.)?facebook\.com\/([A-Za-z0-9._-]+)(?:\/|$)/i);
-          if (m && !/^(?:sharer|login|watch|events|groups|pages|story\.php|photo\.php|permalink\.php|share|reel|hashtag)$/i.test(m[1])) {
-            fbPageUrl = `https://www.facebook.com/${m[1]}`;
-            break;
-          }
-        }
-      } catch (e) {}
+      const searchQuery = discoveredBusinessName
+        ? `site:facebook.com "${discoveredBusinessName}"`
+        : `site:facebook.com ${igUsername.replace(/[._-]+/g, ' ')}`;
+      const searchUrls = [
+        `https://search.yahoo.com/search?p=${encodeURIComponent(searchQuery)}`,
+        `https://search.brave.com/search?q=${encodeURIComponent(searchQuery)}`,
+        `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchQuery)}`
+      ];
 
-      if (!fbPageUrl) {
+      let fbPageUrl = null;
+      for (const sUrl of searchUrls) {
+        if (fbPageUrl || (signal && signal.aborted)) break;
         try {
-          const yahooUrl = `https://search.yahoo.com/search?p=${encodeURIComponent(`site:facebook.com "${searchName}"`)}`;
-          await page.goto(yahooUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-          const html = decodeURIComponent(await page.content());
-          const matches = html.match(/https?:\/\/(?:www\.|m\.|es-la\.)?facebook\.com\/([A-Za-z0-9._-]+)(?:\/|["'&?])/gi) || [];
+          await page.goto(sUrl, { waitUntil: 'domcontentloaded', timeout: 12000 });
+          const rawHtml = await page.content();
+          const html = rawHtml.replace(/%3[aA]/g, ':').replace(/%2[fF]/g, '/');
+          const matches = html.match(/https?:\/\/(?:www\.|m\.|es-la\.)?facebook\.com\/([A-Za-z0-9._-]+)(?:\/|["'&?<>\s])/gi) || [];
           for (const raw of matches) {
             const m = raw.match(/facebook\.com\/([A-Za-z0-9._-]+)/i);
-            if (m && !/^(?:sharer|login|watch|events|groups|pages|story\.php|photo\.php|permalink\.php|share|reel|hashtag|tr)$/i.test(m[1])) {
+            if (
+              m &&
+              !/^(?:sharer|login|watch|events|groups|pages|story\.php|photo\.php|permalink\.php|share|reel|hashtag|tr|plugins|dialog|privacy|policies|help|business)$/i.test(m[1])
+            ) {
               fbPageUrl = `https://www.facebook.com/${m[1]}`;
               break;
             }
