@@ -82,7 +82,11 @@ async function runSocialExtract(targetUrl, { browser = 'chrome', onImage, signal
       const rl = readline.createInterface({ input: currentProc.stdout });
       rl.on('line', (line) => {
         const trimmed = line.trim();
-        if (/^https?:\/\//i.test(trimmed)) {
+        const isActualMedia =
+          /^https?:\/\//i.test(trimmed) &&
+          (/\.(?:jpe?g|png|webp|gif|avif|bmp|svg)(?:\?|$)/i.test(trimmed) ||
+            /(?:fbcdn\.net|cdninstagram\.com|pinimg\.com|twimg\.com|tiktokcdn|googleusercontent\.com)/i.test(trimmed));
+        if (isActualMedia) {
           stdoutCount++;
           if (!foundImages.has(trimmed)) {
             foundImages.add(trimmed);
@@ -155,8 +159,8 @@ async function runSocialBrowserExtract(targetUrl, { onImage, signal } = {}) {
 
     if (!/^https?:\/\//i.test(clean)) return;
     if (/emoji\.php|rsrc\.php|static\.xx\.fbcdn|static\.cdninstagram|\.svg(?:\?|$)/i.test(clean)) return;
-    // Filtrar avatares diminutos o iconos recortados pequeños (<= 160px)
-    if (/(?:[?&](?:ctp|stp)=[^&]*?[sp](?:16|24|32|36|40|48|50|60|64|75|80|100|120|130|148|160)x\d+)|\/[sp](?:32|40|50|60|100|148|160)x\d+\/|stp=cp0/i.test(clean)) {
+    // Filtrar avatares diminutos, previsualizaciones borrosas (_fb50_) o iconos recortados pequeños (<= 160px)
+    if (/(?:[?&](?:ctp|stp)=[^&]*?[sp](?:16|24|32|36|40|48|50|60|64|75|80|100|120|130|148|150|160)x\d+)|\/[sp](?:32|40|50|60|100|148|150|160)x\d+\/|stp=cp0|_fb50_/i.test(clean)) {
       return;
     }
 
@@ -196,12 +200,13 @@ async function runSocialBrowserExtract(targetUrl, { onImage, signal } = {}) {
   const extractFromText = (txt) => {
     if (!txt || typeof txt !== 'string') return;
     const unescaped = txt
+      .replace(/\\\\\//g, '/')
       .replace(/\\\//g, '/')
       .replace(/\\u0025/g, '%')
       .replace(/\\u0026/g, '&')
       .replace(/\\u003d/gi, '=')
       .replace(/&amp;/g, '&');
-    const regex = /https:\/\/(?:scontent[^\s"'<>\\]+|external[^\s"'<>\\]+|[^\s"'<>\\]*cdninstagram\.com[^\s"'<>\\]+|i\.pinimg\.com[^\s"'<>\\]+|pbs\.twimg\.com\/media[^\s"'<>\\]+)\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'<>\\]+)?/gi;
+    const regex = /https:\/\/(?:scontent[^\s"'<>\\]+|external[^\s"'<>\\]+|[^\s"'<>\\]*fbcdn\.net[^\s"'<>\\]+|[^\s"'<>\\]*cdninstagram\.com[^\s"'<>\\]+|i\.pinimg\.com[^\s"'<>\\]+|pbs\.twimg\.com\/media[^\s"'<>\\]+)\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'<>\\]+)?/gi;
     const matches = unescaped.match(regex) || [];
     for (const m of matches) {
       reportCandidate(m);
@@ -225,7 +230,7 @@ async function runSocialBrowserExtract(targetUrl, { onImage, signal } = {}) {
     page.on('response', async (res) => {
       try {
         const u = res.url();
-        if (/(?:scontent|cdninstagram|pinimg\.com|pbs\.twimg\.com).*\.(?:jpg|jpeg|png|webp)/i.test(u)) {
+        if (/(?:scontent|fbcdn\.net|cdninstagram|pinimg\.com|pbs\.twimg\.com).*\.(?:jpg|jpeg|png|webp)/i.test(u)) {
           reportCandidate(u);
         }
         const ct = (res.headers()['content-type'] || '').toLowerCase();
@@ -234,7 +239,9 @@ async function runSocialBrowserExtract(targetUrl, { onImage, signal } = {}) {
           (ct.includes('text') || ct.includes('json') || ct.includes('javascript'))
         ) {
           const text = await res.text();
-          extractFromText(text);
+          if (!text.includes('"ayml_logged_out"')) {
+            extractFromText(text);
+          }
         }
       } catch (e) { /* noop */ }
     });
@@ -245,8 +252,9 @@ async function runSocialBrowserExtract(targetUrl, { onImage, signal } = {}) {
       }, { once: true });
     }
 
-    // Construir lista de vistas a visitar (para páginas de Facebook: el feed principal + la pestaña /photos)
+    // Construir lista de vistas a visitar (Facebook: feed + /photos; Instagram: /embed/ + perfil)
     const urlsToVisit = [targetUrl];
+    let igUsername = null;
     try {
       const parsed = new URL(targetUrl);
       if (/facebook\.com$/i.test(parsed.hostname) && !/photo\.php|\/posts\/|\/videos\/|\/reel\//i.test(parsed.pathname)) {
@@ -259,16 +267,33 @@ async function runSocialBrowserExtract(targetUrl, { onImage, signal } = {}) {
         } else if (cleanPath && cleanPath !== '/') {
           urlsToVisit.push(`${parsed.origin}${cleanPath}/photos`);
         }
+      } else if (/instagram\.com$/i.test(parsed.hostname)) {
+        const parts = parsed.pathname.split('/').filter(Boolean);
+        if (parts.length === 1 && !/^(p|reel|reels|stories|explore|accounts|direct)$/i.test(parts[0])) {
+          igUsername = parts[0];
+          urlsToVisit.unshift(`https://www.instagram.com/${igUsername}/embed/`);
+        } else if (parts.length >= 2 && /^(p|reel|reels)$/i.test(parts[0])) {
+          urlsToVisit.unshift(`https://www.instagram.com/p/${parts[1]}/embed/captioned/`);
+        }
       }
     } catch (e) {}
 
-    for (const visitUrl of urlsToVisit) {
-      if (signal && signal.aborted) break;
+    let discoveredBusinessName = null;
+
+    const visitAndScroll = async (visitUrl, scrollSteps = 7) => {
+      if (signal && signal.aborted) return;
       try {
-        await page.goto(visitUrl, { waitUntil: 'networkidle2', timeout: 25000 });
+        await page.goto(visitUrl, { waitUntil: 'networkidle2', timeout: 22000 });
       } catch (e) { /* continuar con lo cargado */ }
 
       try {
+        const title = await page.title();
+        if (title && /instagram/i.test(title) && !discoveredBusinessName) {
+          const m = title.match(/^([^(@•|\n]+?)\s*(?:\(@|•)/);
+          if (m && m[1].trim().length >= 3 && !/^instagram$/i.test(m[1].trim())) {
+            discoveredBusinessName = m[1].trim();
+          }
+        }
         extractFromText(await page.content());
         const domImgs = await page.evaluate(extractDomImages);
         domImgs.forEach(reportCandidate);
@@ -292,14 +317,14 @@ async function runSocialBrowserExtract(targetUrl, { onImage, signal } = {}) {
             }
           }
         });
-        await new Promise(r => setTimeout(r, 600));
+        await new Promise(r => setTimeout(r, 500));
       } catch (e) {}
 
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < scrollSteps; i++) {
         if (signal && signal.aborted) break;
         try {
           await page.evaluate(() => window.scrollBy(0, 1800));
-          await new Promise(r => setTimeout(r, 550));
+          await new Promise(r => setTimeout(r, 500));
           const domImgs = await page.evaluate(extractDomImages);
           domImgs.forEach(reportCandidate);
         } catch (e) {
@@ -310,6 +335,57 @@ async function runSocialBrowserExtract(targetUrl, { onImage, signal } = {}) {
       try {
         extractFromText(await page.content());
       } catch (e) {}
+    };
+
+    for (const visitUrl of urlsToVisit) {
+      await visitAndScroll(visitUrl, 7);
+    }
+
+    // Si es un perfil de Instagram con restricción de edad (+18, ej. bares/restaurantes como @laplaza_artesanal)
+    // y no devolvió fotos sin sesión, buscar automáticamente su página espejo oficial en Facebook (Meta)
+    if (igUsername && bestByAsset.size === 0 && !(signal && signal.aborted)) {
+      const searchName = discoveredBusinessName || igUsername.replace(/[._-]+/g, ' ');
+      let fbPageUrl = null;
+      try {
+        const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`site:facebook.com "${searchName}"`)}`;
+        await page.goto(ddgUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        const rawHrefs = await page.evaluate(() =>
+          Array.from(document.querySelectorAll('a.result__a, a[href*="facebook.com"]')).map(a => a.href)
+        );
+        for (const raw of rawHrefs) {
+          let candidate = raw;
+          try {
+            const u = new URL(raw);
+            if (u.searchParams.get('uddg')) candidate = decodeURIComponent(u.searchParams.get('uddg'));
+          } catch (e) {}
+          const m = candidate.match(/^https?:\/\/(?:www\.|m\.|es-la\.)?facebook\.com\/([A-Za-z0-9._-]+)(?:\/|$)/i);
+          if (m && !/^(?:sharer|login|watch|events|groups|pages|story\.php|photo\.php|permalink\.php|share|reel|hashtag)$/i.test(m[1])) {
+            fbPageUrl = `https://www.facebook.com/${m[1]}`;
+            break;
+          }
+        }
+      } catch (e) {}
+
+      if (!fbPageUrl) {
+        try {
+          const yahooUrl = `https://search.yahoo.com/search?p=${encodeURIComponent(`site:facebook.com "${searchName}"`)}`;
+          await page.goto(yahooUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+          const html = decodeURIComponent(await page.content());
+          const matches = html.match(/https?:\/\/(?:www\.|m\.|es-la\.)?facebook\.com\/([A-Za-z0-9._-]+)(?:\/|["'&?])/gi) || [];
+          for (const raw of matches) {
+            const m = raw.match(/facebook\.com\/([A-Za-z0-9._-]+)/i);
+            if (m && !/^(?:sharer|login|watch|events|groups|pages|story\.php|photo\.php|permalink\.php|share|reel|hashtag|tr)$/i.test(m[1])) {
+              fbPageUrl = `https://www.facebook.com/${m[1]}`;
+              break;
+            }
+          }
+        } catch (e) {}
+      }
+
+      if (fbPageUrl) {
+        await visitAndScroll(fbPageUrl, 7);
+        await visitAndScroll(`${fbPageUrl}/photos`, 6);
+      }
     }
 
     return Array.from(bestByAsset.values()).map(v => v.url);
