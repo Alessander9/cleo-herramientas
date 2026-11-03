@@ -623,10 +623,10 @@
             </div>
             <div>
               <h2 class="drop-hero-title scr-title">
-                Extrae todas las imágenes <span class="text-gradient-purple">de cualquier sitio web o red social</span>
+                Extrae imágenes <span class="text-gradient-purple">de cualquier web, red social o Google Maps</span>
               </h2>
               <p class="drop-hero-desc">
-                Pega un enlace de cualquier web, o de <strong>Facebook, Instagram, etc.</strong> Cleo extraerá todas las fotos en alta resolución con scroll automático y sesiones locales.
+                Pega un enlace de cualquier web, <strong>Google Maps (fotos de negocios)</strong> o redes (Facebook, Instagram). Cleo extraerá todas las fotos en alta resolución con scroll automático.
               </p>
             </div>
           </div>
@@ -643,7 +643,8 @@
             <div style="margin-left: auto; display: flex; align-items: center; gap: 6px;">
               <span style="font-size: 0.78rem; color: var(--text-secondary);">Motor:</span>
               <select class="deck-select" id="scraperEngineSelect" style="padding: 4px 8px; font-size: 0.8rem;">
-                <option value="auto">⚡ Automático (Detecta web / redes)</option>
+                <option value="auto">⚡ Automático (Detecta web / redes / Maps)</option>
+                <option value="maps">📍 Google Maps (Fotos de negocios)</option>
                 <option value="social">📸 Redes Sociales (Facebook / IG - gallery-dl)</option>
                 <option value="browser">🌐 Navegador Headless (Puppeteer SPA)</option>
                 <option value="standard">📄 Estándar (CORS Proxy / HTML)</option>
@@ -658,7 +659,7 @@
                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
               </svg>
               <input type="url" id="scraperUrlInput" inputmode="url" spellcheck="false"
-                     placeholder="https://facebook.com/pagina/photos o https://ejemplo.com" aria-label="Enlace del sitio web o red social a escanear">
+                     placeholder="https://maps.app.goo.gl/... o https://facebook.com/... o https://ejemplo.com" aria-label="Enlace del sitio web, red social o Google Maps a escanear">
             </label>
             <button type="submit" class="btn-primary-glow scr-btn-scan" id="btnScrapeStart">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
@@ -1169,13 +1170,13 @@
     <div class="modal-window">
       <div class="modal-title-bar">
         <div style="display: flex; align-items: center; gap: 10px;">
-          <h3>⭐ Marcador de 1-Clic para Redes Sociales</h3>
+          <h3>⭐ Marcador de 1-Clic para Redes y Google Maps</h3>
         </div>
         <button class="modal-close-icon" id="btnBookmarkletClose">&times;</button>
       </div>
       <div class="modal-content-body">
         <p style="font-size: 0.88rem; color: var(--text-secondary); margin-bottom: 14px;">
-          Arrastra este botón a tu barra de marcadores del navegador. Cuando estés en cualquier página de Facebook, Instagram o web de clientes:
+          Arrastra este botón a tu barra de marcadores del navegador. Cuando estés en cualquier página de Google Maps, Facebook, Instagram o web de clientes:
         </p>
         <div style="text-align: center; margin: 20px 0;">
           <a id="cleoBookmarkletLink" class="btn-primary-glow" style="display: inline-block; padding: 12px 24px; text-decoration: none; cursor: move;" href="#">
@@ -1186,10 +1187,10 @@
           </div>
         </div>
         <ol style="font-size: 0.85rem; color: var(--text-secondary); padding-left: 20px; line-height: 1.6;">
-          <li>Abre la página o fanpage en tu navegador (ej: Facebook o Instagram).</li>
-          <li>Haz un poco de scroll para que aparezcan las fotos que necesitas.</li>
+          <li>Abre la ubicación en Google Maps o la página del negocio (Facebook/Instagram).</li>
+          <li>Haz un poco de scroll en la galería para que carguen las fotos.</li>
           <li>Pulsa el marcador <strong>📸 Extraer a Cleo</strong>.</li>
-          <li>Las fotos se enviarán automáticamente a esta ventana de Cleo Herramientas.</li>
+          <li>Las fotos se normalizarán a máxima calidad y se enviarán automáticamente a Cleo Herramientas.</li>
         </ol>
       </div>
       <div class="modal-bottom-bar">

@@ -1176,6 +1176,57 @@
       }
     }
 
+    async function startGoogleMapsScan(startUrl, scan) {
+      els.statusText.textContent = 'Conectando con Google Maps y abriendo galería de fotos...';
+      els.pagesDone.textContent = '1';
+      els.progressFill.style.width = '25%';
+
+      try {
+        const streamUrl = `/api/maps-extract?url=${encodeURIComponent(startUrl)}&stream=1&scrolls=15`;
+        const res = await fetch(streamUrl, { signal: scan.ctrl.signal });
+        if (!res.ok) {
+          throw new Error(`Error en el servidor (${res.status})`);
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(trimmed.slice(6));
+                if (data.type === 'image' && data.url) {
+                  addImage(data.url, data.url, 'maps', startUrl, 'Foto de Google Maps');
+                  els.imagesFound.textContent = String(state.items.length);
+                  els.statusText.textContent = `Descubriendo fotos de la ubicación en alta calidad... (${state.items.length} encontradas)`;
+                  scheduleRender();
+                } else if (data.type === 'error') {
+                  showError(`Aviso Google Maps: ${data.error}`);
+                }
+              } catch (e) { /* ignore parse */ }
+            }
+          }
+        }
+        scan.pagesOk = 1;
+      } catch (err) {
+        if (!scan.ctrl.signal.aborted) {
+          showError(`Google Maps: ${err.message}. Puedes usar también el botón "⭐ Marcador para Redes" o "📋 Pegar URLs".`);
+        }
+      } finally {
+        finishScan(scan);
+      }
+    }
+
     async function startScan() {
       if (state.scan) return;
       const startUrl = normalizeInputUrl(els.input.value);
@@ -1226,9 +1277,17 @@
 
       const engine = els.engineSelect ? els.engineSelect.value : 'auto';
       let isSocial = false;
+      let isMaps = false;
       try {
-        isSocial = /facebook\.com|fb\.watch|instagram\.com|threads\.net|tiktok\.com|pinterest\.com|twitter\.com|x\.com|reddit\.com/i.test(new URL(startUrl).hostname);
+        const host = new URL(startUrl).hostname;
+        isSocial = /facebook\.com|fb\.watch|instagram\.com|threads\.net|tiktok\.com|pinterest\.com|twitter\.com|x\.com|reddit\.com/i.test(host);
+        isMaps = /google\.[a-z.]+\/maps|maps\.google\.[a-z.]+|maps\.app\.goo\.gl|goo\.gl\/maps/i.test(startUrl);
       } catch (e) {}
+
+      if (engine === 'maps' || (engine === 'auto' && isMaps)) {
+        await startGoogleMapsScan(startUrl, scan);
+        return;
+      }
 
       if (engine === 'social' || (engine === 'auto' && isSocial)) {
         await startSocialScan(startUrl, scan);
@@ -2500,7 +2559,7 @@
      * ------------------------------------------------------------------ */
     if (els.btnOpenBookmarkletModal && els.bookmarkletModal) {
       const currentOrigin = window.location.origin;
-      const bookmarkletCode = "javascript:(function(){var imgs=Array.from(document.querySelectorAll('img')).map(function(i){return i.currentSrc||i.src||i.getAttribute('data-src')||i.getAttribute('data-lazy-src')||i.getAttribute('data-original');}).filter(function(s){return s&&/^https?:\\/\\//i.test(s)&&!s.includes('rsrc.php')&&!s.includes('emoji.php');});var unique=Array.from(new Set(imgs));if(!unique.length){alert('No se encontraron imágenes en esta vista. Haz scroll e intenta de nuevo.');return;}var target='" + currentOrigin + "/?import_urls='+encodeURIComponent(JSON.stringify(unique));window.open(target,'_blank');})();";
+      const bookmarkletCode = "javascript:(function(){var imgs=[];document.querySelectorAll('img').forEach(function(i){var s=i.currentSrc||i.src||i.getAttribute('data-src')||i.getAttribute('data-lazy-src')||i.getAttribute('data-original');if(s)imgs.push(s);});document.querySelectorAll('*').forEach(function(el){var bg=(el.style&&el.style.backgroundImage)||'';var m=bg.match(/url\\(['\"]?(https?:\\/\\/[^'\"]+)['\"]?\\)/i);if(m)imgs.push(m[1]);});var valid=imgs.filter(function(s){return s&&/^https?:\\/\\//i.test(s)&&!s.includes('rsrc.php')&&!s.includes('emoji.php')&&!s.includes('mapslogo')&&!s.includes('default-user');}).map(function(s){return s.replace(/=w\\d+-h\\d+.*$|=s\\d+.*$/i,'=s0');});var unique=Array.from(new Set(valid));if(!unique.length){alert('No se encontraron imágenes en esta vista. Haz scroll e intenta de nuevo.');return;}var target='" + currentOrigin + "/?import_urls='+encodeURIComponent(JSON.stringify(unique));window.open(target,'_blank');})();";
 
       if (els.cleoBookmarkletLink) {
         els.cleoBookmarkletLink.setAttribute('href', bookmarkletCode);

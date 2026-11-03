@@ -2,7 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const proxyHandler = require('./api/proxy');
-const { runSocialExtract, runBrowserExtract } = require('./api/extractors');
+const { runSocialExtract, runBrowserExtract, runGoogleMapsExtract } = require('./api/extractors');
 
 const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
@@ -155,6 +155,70 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         try {
           const images = await runBrowserExtract(targetUrl, { maxScrolls: scrolls, signal: ac.signal });
+          return res.end(JSON.stringify({ ok: true, count: images.length, images }));
+        } catch (err) {
+          res.statusCode = 500;
+          return res.end(JSON.stringify({ ok: false, error: err.message }));
+        }
+      }
+    }
+
+    // Endpoint de extracción para Google Maps (Fichas y fotos de negocios)
+    if (pathname === '/api/maps-extract') {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      if (req.method === 'OPTIONS') {
+        res.statusCode = 204;
+        return res.end();
+      }
+
+      const targetUrl = parsedUrl.searchParams.get('url');
+      if (!targetUrl) {
+        res.statusCode = 400;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        return res.end(JSON.stringify({ ok: false, error: 'Falta el parámetro url' }));
+      }
+
+      const streamMode = parsedUrl.searchParams.get('stream') === '1' || (req.headers.accept && req.headers.accept.includes('text/event-stream'));
+      const scrolls = parseInt(parsedUrl.searchParams.get('scrolls'), 10) || 15;
+      const ac = new AbortController();
+      req.on('close', () => ac.abort());
+
+      if (streamMode) {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          'Connection': 'keep-alive'
+        });
+
+        const safeWrite = (obj) => {
+          if (!res.writableEnded && !res.destroyed) {
+            try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch (e) {}
+          }
+        };
+
+        let count = 0;
+        try {
+          await runGoogleMapsExtract(targetUrl, {
+            maxScrolls: scrolls,
+            signal: ac.signal,
+            onImage: (imgUrl) => {
+              count++;
+              safeWrite({ type: 'image', url: imgUrl });
+            }
+          });
+          safeWrite({ type: 'done', count });
+        } catch (err) {
+          safeWrite({ type: 'error', error: err.message });
+        }
+        if (!res.writableEnded && !res.destroyed) {
+          try { res.end(); } catch (e) {}
+        }
+        return;
+      } else {
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        try {
+          const images = await runGoogleMapsExtract(targetUrl, { maxScrolls: scrolls, signal: ac.signal });
           return res.end(JSON.stringify({ ok: true, count: images.length, images }));
         } catch (err) {
           res.statusCode = 500;
