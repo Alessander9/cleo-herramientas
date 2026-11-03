@@ -19,6 +19,8 @@
   },
   "homepage": "https://github.com/Alessander9/Comprimir-fotos#readme",
   "dependencies": {
-    "puppeteer": "^25.16.0"
+    "@sparticuz/chromium": "^153.0.0",
+    "puppeteer": "^25.16.0",
+    "puppeteer-core": "^25.16.0"
   }
 }

@@ -1182,7 +1182,7 @@
       els.progressFill.style.width = '25%';
 
       try {
-        const streamUrl = `/api/maps-extract?url=${encodeURIComponent(startUrl)}&stream=1&scrolls=15`;
+        const streamUrl = `/api/maps-extract?url=${encodeURIComponent(startUrl)}&stream=1&scrolls=35`;
         const res = await fetch(streamUrl, { signal: scan.ctrl.signal });
         if (!res.ok) {
           throw new Error(`Error en el servidor (${res.status})`);

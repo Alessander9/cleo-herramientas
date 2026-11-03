@@ -102,16 +102,45 @@ function runSocialExtract(targetUrl, { browser = 'chrome', onImage, signal } = {
 }
 
 /**
- * Extrae URLs de imágenes de sitios SPA modernos usando Puppeteer y scroll dinámico.
+ * Lanza una instancia de Chromium compatible tanto en entorno local (puppeteer)
+ * como en Vercel Serverless / AWS Lambda (@sparticuz/chromium + puppeteer-core).
  */
-async function runBrowserExtract(targetUrl, { maxScrolls = 8, onImage, signal } = {}) {
+async function launchBrowser(extraArgs = []) {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    const chromium = require('@sparticuz/chromium');
+    const puppeteerCore = require('puppeteer-core');
+    return puppeteerCore.launch({
+      args: [...chromium.args, '--disable-blink-features=AutomationControlled', ...extraArgs],
+      defaultViewport: { width: 1366, height: 768 },
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless
+    });
+  }
+
   let puppeteer;
   try {
     puppeteer = require('puppeteer');
   } catch (e) {
     throw new Error('Puppeteer no está instalado en el servidor.');
   }
+  return puppeteer.launch({
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--disable-gpu',
+      '--disable-blink-features=AutomationControlled',
+      ...extraArgs
+    ]
+  });
+}
 
+/**
+ * Extrae URLs de imágenes de sitios SPA modernos usando Puppeteer y scroll dinámico.
+ */
+async function runBrowserExtract(targetUrl, { maxScrolls = 8, onImage, signal } = {}) {
   const foundImages = new Set();
   const reportImage = (url) => {
     if (!url || typeof url !== 'string') return;
@@ -123,16 +152,7 @@ async function runBrowserExtract(targetUrl, { maxScrolls = 8, onImage, signal } 
     }
   };
 
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--disable-gpu'
-    ]
-  });
+  const browser = await launchBrowser();
 
   try {
     const page = await browser.newPage();
@@ -248,13 +268,6 @@ function normalizeGooglePhoto(url) {
  * Extrae fotos en alta resolución de una ubicación o ficha de Google Maps.
  */
 async function runGoogleMapsExtract(targetUrl, { maxScrolls = 35, onImage, signal } = {}) {
-  let puppeteer;
-  try {
-    puppeteer = require('puppeteer');
-  } catch (e) {
-    throw new Error('Puppeteer no está instalado en el servidor.');
-  }
-
   const foundImages = new Set();
   const reportImage = (url) => {
     const hiRes = normalizeGooglePhoto(url);
@@ -270,17 +283,12 @@ async function runGoogleMapsExtract(targetUrl, { maxScrolls = 35, onImage, signa
     if (matches) matches.forEach(reportImage);
   };
 
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--disable-gpu',
-      '--disable-blink-features=AutomationControlled'
-    ]
-  });
+  // Extraer de inmediato cualquier miniatura codificada en la propia URL (ej. 6shttps:%2F%2Flh3...)
+  try {
+    extractUrlsFromText(decodeURIComponent(targetUrl));
+  } catch (e) {}
+
+  const browser = await launchBrowser();
 
   try {
     const page = await browser.newPage();

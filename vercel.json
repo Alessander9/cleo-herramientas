@@ -1,7 +1,16 @@
 {
-  "name": "cleo-herramientas",
   "version": 2,
   "cleanUrls": true,
+  "functions": {
+    "api/maps-extract.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/browser-extract.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    }
+  },
   "headers": [
     {
       "source": "/(.*)",
