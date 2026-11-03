@@ -107,13 +107,14 @@ function runSocialExtract(targetUrl, { browser = 'chrome', onImage, signal } = {
  */
 async function launchBrowser(extraArgs = []) {
   if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
-    const chromium = require('@sparticuz/chromium');
+    const chromiumMod = await import('@sparticuz/chromium');
+    const chromium = chromiumMod.default || chromiumMod;
     const puppeteerCore = require('puppeteer-core');
     return puppeteerCore.launch({
       args: [...chromium.args, '--disable-blink-features=AutomationControlled', ...extraArgs],
       defaultViewport: { width: 1366, height: 768 },
       executablePath: await chromium.executablePath(),
-      headless: chromium.headless
+      headless: 'shell'
     });
   }
 
