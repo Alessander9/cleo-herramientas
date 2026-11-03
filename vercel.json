@@ -9,6 +9,10 @@
     "api/browser-extract.js": {
       "maxDuration": 60,
       "includeFiles": "node_modules/@sparticuz/chromium/bin/**"
+    },
+    "api/social-extract.js": {
+      "maxDuration": 60,
+      "includeFiles": "node_modules/@sparticuz/chromium/bin/**"
     }
   },
   "headers": [

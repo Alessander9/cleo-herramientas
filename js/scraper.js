@@ -383,6 +383,21 @@
       let pathname = cleanUrl.pathname;
       let score = Infinity;
 
+      // Facebook / Instagram CDN (fbcdn.net, cdninstagram.com): agrupar por archivo y puntuar por resolución ctp/stp
+      if (/fbcdn\.net|cdninstagram\.com/i.test(cleanUrl.hostname)) {
+        const fileSeg = pathname.split('/').filter(Boolean).pop() || pathname;
+        const ctp = cleanUrl.searchParams.get('ctp') || '';
+        const stp = cleanUrl.searchParams.get('stp') || '';
+        const dimMatch = (ctp + ' ' + stp + ' ' + pathname).match(/[sp](\d{2,4})x(\d{2,4})/i);
+        if (dimMatch) {
+          score = parseInt(dimMatch[1], 10) * parseInt(dimMatch[2], 10);
+        }
+        return {
+          canonicalKey: ('social-cdn://' + fileSeg).toLowerCase(),
+          score
+        };
+      }
+
       // WordPress / WooCommerce: -1024x768.ext o -300x300.ext
       const wpMatch = pathname.match(/^(.*?)-(\d{2,4})x(\d{2,4})(\.[a-z0-9]+)$/i);
       if (wpMatch) {

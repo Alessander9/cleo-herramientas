@@ -11,9 +11,13 @@ const { spawn } = require('child_process');
 const readline = require('readline');
 
 /**
- * Extrae URLs de imágenes de redes sociales usando gallery-dl.
+ * Extrae URLs de imágenes de redes sociales usando gallery-dl (local) o Chromium Headless (Vercel / fallback).
  */
-function runSocialExtract(targetUrl, { browser = 'chrome', onImage, signal } = {}) {
+async function runSocialExtract(targetUrl, { browser = 'chrome', onImage, signal } = {}) {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return runSocialBrowserExtract(targetUrl, { onImage, signal });
+  }
+
   return new Promise((resolve, reject) => {
     const browsersToTry = [browser, 'edge', 'brave', 'firefox', null].filter((v, i, a) => a.indexOf(v) === i);
     let currentBrowserIdx = 0;
@@ -26,6 +30,32 @@ function runSocialExtract(targetUrl, { browser = 'chrome', onImage, signal } = {
           try { currentProc.kill(); } catch (e) { /* noop */ }
         }
       }, { once: true });
+    }
+
+    function fallbackToHeadless(originalError) {
+      runSocialBrowserExtract(targetUrl, {
+        onImage: (url) => {
+          if (!foundImages.has(url)) {
+            foundImages.add(url);
+            if (onImage) onImage(url);
+          }
+        },
+        signal
+      })
+        .then((imgs) => {
+          imgs.forEach((u) => foundImages.add(u));
+          if (foundImages.size > 0) {
+            resolve(Array.from(foundImages));
+          } else if (originalError) {
+            reject(originalError);
+          } else {
+            resolve([]);
+          }
+        })
+        .catch(() => {
+          if (foundImages.size > 0) resolve(Array.from(foundImages));
+          else reject(originalError || new Error('No se pudieron extraer imágenes de la red social.'));
+        });
     }
 
     function tryNextBrowser() {
@@ -46,7 +76,7 @@ function runSocialExtract(targetUrl, { browser = 'chrome', onImage, signal } = {
       try {
         currentProc = spawn('python', args, { windowsHide: true });
       } catch (err) {
-        return reject(new Error(`Error al iniciar python gallery_dl: ${err.message}`));
+        return fallbackToHeadless(new Error(`Error al iniciar python gallery_dl: ${err.message}`));
       }
 
       const rl = readline.createInterface({ input: currentProc.stdout });
@@ -70,7 +100,7 @@ function runSocialExtract(targetUrl, { browser = 'chrome', onImage, signal } = {
         if (currentBrowserIdx < browsersToTry.length) {
           tryNextBrowser();
         } else {
-          reject(err);
+          fallbackToHeadless(err);
         }
       });
 
@@ -88,17 +118,206 @@ function runSocialExtract(targetUrl, { browser = 'chrome', onImage, signal } = {
         if (currentBrowserIdx < browsersToTry.length) {
           tryNextBrowser();
         } else {
-          if (foundImages.size === 0 && code !== 0) {
-            reject(new Error(stderrOutput.trim() || `gallery-dl finalizó con código ${code}`));
-          } else {
-            resolve(Array.from(foundImages));
-          }
+          const err =
+            foundImages.size === 0 && code !== 0
+              ? new Error(stderrOutput.trim() || `gallery-dl finalizó con código ${code}`)
+              : null;
+          fallbackToHeadless(err);
         }
       });
     }
 
     tryNextBrowser();
   });
+}
+
+/**
+ * Extrae fotos de redes sociales (Facebook, Instagram, Pinterest, TikTok) usando Chromium Headless,
+ * interceptando respuestas GraphQL/CDN, cerrando modales de login y recorriendo tanto el feed principal
+ * como la pestaña /photos en páginas de Facebook.
+ */
+async function runSocialBrowserExtract(targetUrl, { onImage, signal } = {}) {
+  const bestByAsset = new Map();
+  const orderedUrls = [];
+
+  const reportCandidate = (rawUrl) => {
+    if (!rawUrl || typeof rawUrl !== 'string') return;
+    const clean = rawUrl
+      .trim()
+      .replace(/\\\//g, '/')
+      .replace(/\\u0025/g, '%')
+      .replace(/\\u0026/g, '&')
+      .replace(/\\u003C/gi, '<')
+      .replace(/\\u003E/gi, '>')
+      .replace(/\\u003d/gi, '=')
+      .replace(/&amp;/g, '&')
+      .replace(/[\\)"',;]+$/, '');
+
+    if (!/^https?:\/\//i.test(clean)) return;
+    if (/emoji\.php|rsrc\.php|static\.xx\.fbcdn|static\.cdninstagram|\.svg(?:\?|$)/i.test(clean)) return;
+    // Filtrar avatares diminutos o iconos recortados pequeños (<= 160px)
+    if (/(?:[?&](?:ctp|stp)=[^&]*?[sp](?:16|24|32|36|40|48|50|60|64|75|80|100|120|130|148|160)x\d+)|\/[sp](?:32|40|50|60|100|148|160)x\d+\/|stp=cp0/i.test(clean)) {
+      return;
+    }
+
+    let u;
+    try {
+      u = new URL(clean);
+    } catch (e) {
+      return;
+    }
+
+    let assetKey = u.origin + u.pathname;
+    let score = 500000;
+
+    if (/fbcdn\.net|cdninstagram\.com/i.test(u.hostname)) {
+      const fileSeg = u.pathname.split('/').filter(Boolean).pop() || u.pathname;
+      assetKey = 'social-cdn://' + fileSeg.toLowerCase();
+      const ctp = u.searchParams.get('ctp') || '';
+      const stp = u.searchParams.get('stp') || '';
+      const dimMatch = (ctp + ' ' + stp + ' ' + u.pathname).match(/[sp](\d{2,4})x(\d{2,4})/i);
+      if (dimMatch) {
+        score = parseInt(dimMatch[1], 10) * parseInt(dimMatch[2], 10);
+      } else {
+        const cstp = u.searchParams.get('cstp') || '';
+        const cstpMatch = cstp.match(/mx(\d{2,4})x(\d{2,4})/i);
+        score = cstpMatch ? parseInt(cstpMatch[1], 10) * parseInt(cstpMatch[2], 10) * 2 : 2000000;
+      }
+    }
+
+    const prev = bestByAsset.get(assetKey);
+    if (!prev || score > prev.score) {
+      bestByAsset.set(assetKey, { url: clean, score });
+      orderedUrls.push(clean);
+      if (onImage) onImage(clean);
+    }
+  };
+
+  const extractFromText = (txt) => {
+    if (!txt || typeof txt !== 'string') return;
+    const unescaped = txt
+      .replace(/\\\//g, '/')
+      .replace(/\\u0025/g, '%')
+      .replace(/\\u0026/g, '&')
+      .replace(/\\u003d/gi, '=')
+      .replace(/&amp;/g, '&');
+    const regex = /https:\/\/(?:scontent[^\s"'<>\\]+|external[^\s"'<>\\]+|[^\s"'<>\\]*cdninstagram\.com[^\s"'<>\\]+|i\.pinimg\.com[^\s"'<>\\]+|pbs\.twimg\.com\/media[^\s"'<>\\]+)\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'<>\\]+)?/gi;
+    const matches = unescaped.match(regex) || [];
+    for (const m of matches) {
+      reportCandidate(m);
+    }
+  };
+
+  const browser = await launchBrowser();
+  try {
+    const page = await browser.newPage();
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+    );
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'es-PE,es;q=0.9,en;q=0.8'
+    });
+    await page.setViewport({ width: 1366, height: 768 });
+
+    page.on('response', async (res) => {
+      try {
+        const u = res.url();
+        if (/(?:scontent|cdninstagram|pinimg\.com|pbs\.twimg\.com).*\.(?:jpg|jpeg|png|webp)/i.test(u)) {
+          reportCandidate(u);
+        }
+        const ct = (res.headers()['content-type'] || '').toLowerCase();
+        if (
+          /graphql|ajax|facebook\.com|instagram\.com|pinterest\.com/i.test(u) &&
+          (ct.includes('text') || ct.includes('json') || ct.includes('javascript'))
+        ) {
+          const text = await res.text();
+          extractFromText(text);
+        }
+      } catch (e) { /* noop */ }
+    });
+
+    if (signal) {
+      signal.addEventListener('abort', async () => {
+        try { await browser.close(); } catch (e) { /* noop */ }
+      }, { once: true });
+    }
+
+    // Construir lista de vistas a visitar (para páginas de Facebook: el feed principal + la pestaña /photos)
+    const urlsToVisit = [targetUrl];
+    try {
+      const parsed = new URL(targetUrl);
+      if (/facebook\.com$/i.test(parsed.hostname) && !/photo\.php|\/posts\/|\/videos\/|\/reel\//i.test(parsed.pathname)) {
+        const cleanPath = parsed.pathname.replace(/\/+$/, '');
+        if (/\/photos(?:_by|_albums)?$/i.test(cleanPath)) {
+          const basePagePath = cleanPath.replace(/\/photos(?:_by|_albums)?$/i, '');
+          if (basePagePath) {
+            urlsToVisit.unshift(`${parsed.origin}${basePagePath}`);
+          }
+        } else if (cleanPath && cleanPath !== '/') {
+          urlsToVisit.push(`${parsed.origin}${cleanPath}/photos`);
+        }
+      }
+    } catch (e) {}
+
+    for (const visitUrl of urlsToVisit) {
+      if (signal && signal.aborted) break;
+      try {
+        await page.goto(visitUrl, { waitUntil: 'networkidle2', timeout: 25000 });
+      } catch (e) { /* continuar con lo cargado */ }
+
+      try {
+        extractFromText(await page.content());
+        const domImgs = await page.evaluate(extractDomImages);
+        domImgs.forEach(reportCandidate);
+      } catch (e) {}
+
+      // Cerrar modal de inicio de sesión de Facebook/Instagram si aparece
+      try {
+        await page.evaluate(() => {
+          const closeSelectors = [
+            '[aria-label="Cerrar"]',
+            '[aria-label="Close"]',
+            'div[role="dialog"] [aria-label="Cerrar"]',
+            'div[role="dialog"] [aria-label="Close"]',
+            'div[role="dialog"] [role="button"]'
+          ];
+          for (const sel of closeSelectors) {
+            const btn = document.querySelector(sel);
+            if (btn) {
+              btn.click();
+              break;
+            }
+          }
+        });
+        await new Promise(r => setTimeout(r, 600));
+      } catch (e) {}
+
+      for (let i = 0; i < 8; i++) {
+        if (signal && signal.aborted) break;
+        try {
+          await page.evaluate(() => window.scrollBy(0, 1800));
+          await new Promise(r => setTimeout(r, 550));
+          const domImgs = await page.evaluate(extractDomImages);
+          domImgs.forEach(reportCandidate);
+        } catch (e) {
+          break;
+        }
+      }
+
+      try {
+        extractFromText(await page.content());
+      } catch (e) {}
+    }
+
+    return Array.from(bestByAsset.values()).map(v => v.url);
+  } finally {
+    try {
+      await browser.close();
+    } catch (e) { /* noop */ }
+  }
 }
 
 /**
