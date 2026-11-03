@@ -162,6 +162,9 @@ async function runBrowserExtract(targetUrl, { maxScrolls = 8, onImage, signal } 
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
     );
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'es-PE,es;q=0.9,en;q=0.8'
+    });
     await page.setViewport({ width: 1366, height: 768 });
 
     // Interceptar respuestas de red para imágenes en tiempo real
@@ -301,6 +304,9 @@ async function runGoogleMapsExtract(targetUrl, { maxScrolls = 35, onImage, signa
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
     );
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'es-PE,es;q=0.9,en;q=0.8'
+    });
     await page.setViewport({ width: 1366, height: 768 });
 
     // Ampliar el límite de fotos solicitado en el endpoint interno preview/place de Google Maps
@@ -376,8 +382,8 @@ async function runGoogleMapsExtract(targetUrl, { maxScrolls = 35, onImage, signa
           const jsaction = b.getAttribute('jsaction') || '';
           if (/agregar|add|subir|upload/i.test(text + ' ' + aria)) return false;
           return (
-            /ver fotos|\d+\s*fotos/i.test(text) ||
-            /^foto de /i.test(aria) ||
+            /ver fotos|see photos|all photos|\d+\+?\s*(?:fotos|photos)/i.test(text) ||
+            /^(?:foto de|photo of) /i.test(aria) ||
             jsaction.includes('heroHeaderImage') ||
             b.classList.contains('aoRNLd') ||
             b.classList.contains('zEjzpe')
