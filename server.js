@@ -180,7 +180,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       const streamMode = parsedUrl.searchParams.get('stream') === '1' || (req.headers.accept && req.headers.accept.includes('text/event-stream'));
-      const scrolls = parseInt(parsedUrl.searchParams.get('scrolls'), 10) || 15;
+      const scrolls = parseInt(parsedUrl.searchParams.get('scrolls'), 10) || 35;
       const ac = new AbortController();
       req.on('close', () => ac.abort());
 

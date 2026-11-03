@@ -233,16 +233,21 @@ function extractDomImages() {
  */
 function normalizeGooglePhoto(url) {
   if (!url || typeof url !== 'string') return null;
-  const clean = url.trim().replace(/&amp;/g, '&');
-  if (!/(googleusercontent\.com\/(?:p|grass-cs|gps-cs-s|places)\/|ggpht\.com)/i.test(clean)) return null;
-  if (/default-user|mapslogo|tactile|streetview_preview/i.test(clean)) return null;
-  return clean.replace(/=w\d+-h\d+.*$|=s\d+.*$/i, '=s0');
+  const clean = url
+    .trim()
+    .replace(/\\u003d/g, '=')
+    .replace(/\\u0026/g, '&')
+    .replace(/\\+/g, '')
+    .replace(/&amp;/g, '&');
+  if (!/(googleusercontent\.com\/(?:p|grass-cs|gps-cs-s|gpms-cs-s|places)\/|ggpht\.com)/i.test(clean)) return null;
+  if (/default-user|mapslogo|tactile|streetview_preview|\/a\//i.test(clean)) return null;
+  return clean.replace(/=[swh]\d+.*$/i, '=s0');
 }
 
 /**
  * Extrae fotos en alta resolución de una ubicación o ficha de Google Maps.
  */
-async function runGoogleMapsExtract(targetUrl, { maxScrolls = 15, onImage, signal } = {}) {
+async function runGoogleMapsExtract(targetUrl, { maxScrolls = 35, onImage, signal } = {}) {
   let puppeteer;
   try {
     puppeteer = require('puppeteer');
@@ -259,6 +264,12 @@ async function runGoogleMapsExtract(targetUrl, { maxScrolls = 15, onImage, signa
     }
   };
 
+  const extractUrlsFromText = (text) => {
+    if (!text || typeof text !== 'string') return;
+    const matches = text.match(/https?:\/\/(?:lh\d+\.googleusercontent\.com|lh\d+\.ggpht\.com)\/[a-zA-Z0-9_\-\/=]+/g);
+    if (matches) matches.forEach(reportImage);
+  };
+
   const browser = await puppeteer.launch({
     headless: 'new',
     args: [
@@ -266,22 +277,50 @@ async function runGoogleMapsExtract(targetUrl, { maxScrolls = 15, onImage, signa
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-accelerated-2d-canvas',
-      '--disable-gpu'
+      '--disable-gpu',
+      '--disable-blink-features=AutomationControlled'
     ]
   });
 
   try {
     const page = await browser.newPage();
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
     );
     await page.setViewport({ width: 1366, height: 768 });
 
-    // Interceptar tráfico de red para capturar fotos dinámicas al vuelo
-    page.on('response', (response) => {
+    // Ampliar el límite de fotos solicitado en el endpoint interno preview/place de Google Maps
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      try {
+        let reqUrl = req.url();
+        if (reqUrl.includes('/maps/preview/place')) {
+          reqUrl = reqUrl.replace(/!3i\d+!/g, '!3i500!').replace(/!4i\d+!/g, '!4i100!');
+          return req.continue({ url: reqUrl });
+        }
+        req.continue();
+      } catch (e) {
+        try { req.continue(); } catch (_) {}
+      }
+    });
+
+    // Interceptar tráfico de red y cuerpos RPC (preview/place, photometa, batchexecute)
+    page.on('response', async (response) => {
       try {
         const u = response.url();
         reportImage(u);
+        if (
+          u.includes('/maps/preview/place') ||
+          u.includes('photometa') ||
+          u.includes('batchexecute') ||
+          u.includes('/maps/rpc/')
+        ) {
+          const text = await response.text();
+          extractUrlsFromText(text);
+        }
       } catch (e) { /* noop */ }
     });
 
@@ -293,6 +332,7 @@ async function runGoogleMapsExtract(targetUrl, { maxScrolls = 15, onImage, signa
 
     // 1. Navegar a Google Maps (sigue automáticamente redirecciones como maps.app.goo.gl)
     await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 35000 });
+    await new Promise(r => setTimeout(r, 1800));
 
     // 2. Gestionar consentimiento de cookies si aparece
     try {
@@ -301,22 +341,37 @@ async function runGoogleMapsExtract(targetUrl, { maxScrolls = 15, onImage, signa
         const consent = btns.find(b => /aceptar|accept|agree|rechazar/i.test(b.innerText || ''));
         if (consent) consent.click();
       });
-      await new Promise(r => setTimeout(r, 800));
+      await new Promise(r => setTimeout(r, 600));
     } catch (e) {}
 
-    // 3. Extraer imágenes iniciales visibles
+    // 3. Extraer imágenes iniciales del HTML y del DOM
+    try {
+      const html = await page.content();
+      extractUrlsFromText(html);
+    } catch (e) {}
     const initialDom = await page.evaluate(extractDomImages);
     initialDom.forEach(reportImage);
 
-    // 4. Hacer clic en el botón de la galería de fotos si existe
+    // 4. Si aún no estamos en el visor/galería de fotos, abrir la galería (evitando "Agregar fotos")
     try {
       const clicked = await page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll('button'));
-        const photoBtn = btns.find(b =>
-          (b.innerText && (b.innerText.includes('Ver fotos') || b.innerText.includes('Fotos'))) ||
-          (b.getAttribute('aria-label') && /foto/i.test(b.getAttribute('aria-label'))) ||
-          (b.getAttribute('jsaction') && b.getAttribute('jsaction').includes('heroHeaderImage'))
-        );
+        const inPhotoViewer = !!document.querySelector('a.MIgS0d, div.aHpZye, button.eU5Rrb, button[jsaction*="play.onRightClick"]');
+        if (inPhotoViewer) return false;
+
+        const btns = Array.from(document.querySelectorAll('button, div[role="button"]'));
+        const photoBtn = btns.find(b => {
+          const text = (b.innerText || '').trim();
+          const aria = (b.getAttribute('aria-label') || '').trim();
+          const jsaction = b.getAttribute('jsaction') || '';
+          if (/agregar|add|subir|upload/i.test(text + ' ' + aria)) return false;
+          return (
+            /ver fotos|\d+\s*fotos/i.test(text) ||
+            /^foto de /i.test(aria) ||
+            jsaction.includes('heroHeaderImage') ||
+            b.classList.contains('aoRNLd') ||
+            b.classList.contains('zEjzpe')
+          );
+        });
         if (photoBtn) {
           photoBtn.click();
           return true;
@@ -325,26 +380,42 @@ async function runGoogleMapsExtract(targetUrl, { maxScrolls = 15, onImage, signa
       });
 
       if (clicked) {
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 2500));
       }
     } catch (e) {}
 
-    // 5. Scroll progresivo por el feed de fotos de Google Maps
+    // 5. Recorrido profundo: scroll en el feed, clic en miniaturas laterales y avance en el visor
+    let stagnantCount = 0;
+    let lastCount = foundImages.size;
+
     for (let i = 0; i < maxScrolls; i++) {
       if (signal && signal.aborted) break;
 
-      const newUrls = await page.evaluate(() => {
+      const newUrls = await page.evaluate((step) => {
+        // a) Scroll en contenedores laterales de fotos
         const containers = Array.from(document.querySelectorAll('div[role="feed"], div.m6QErb, div.DxyBCb, div.m6QErb.DxyBCb'));
-        let scrolled = false;
         for (const el of containers) {
-          if (el.scrollHeight > el.clientHeight + 50) {
+          if (el.scrollHeight > el.clientHeight + 20) {
             el.scrollBy(0, 1600);
-            scrolled = true;
           }
         }
-        if (!scrolled) window.scrollBy(0, 1600);
 
-        // Extraer fotos presentes en el DOM en esta iteración
+        // b) Cada pocos pasos, seleccionar una miniatura lateral distinta para cargar su secuencia
+        if (step % 4 === 0) {
+          const thumbs = document.querySelectorAll('a.MIgS0d');
+          const thumbIdx = Math.floor(step / 4);
+          if (thumbs[thumbIdx]) {
+            thumbs[thumbIdx].click();
+          }
+        } else {
+          // c) Avanzar a la siguiente foto en el visor principal para disparar photometa/v1
+          const nextBtn = document.querySelector(
+            'button.eU5Rrb, button[aria-label="Siguiente"], button[aria-label="Next"], button[jsaction*="play.onRightClick"]'
+          );
+          if (nextBtn) nextBtn.click();
+        }
+
+        // d) Recolectar imágenes presentes en el DOM
         const found = [];
         document.querySelectorAll('*').forEach(el => {
           if (el.tagName === 'IMG' && el.src) found.push(el.src);
@@ -353,10 +424,18 @@ async function runGoogleMapsExtract(targetUrl, { maxScrolls = 15, onImage, signa
           if (m) found.push(m[1]);
         });
         return found;
-      });
+      }, i);
 
       newUrls.forEach(reportImage);
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, 350));
+
+      if (foundImages.size > lastCount) {
+        lastCount = foundImages.size;
+        stagnantCount = 0;
+      } else {
+        stagnantCount++;
+        if (stagnantCount >= 10 && i >= 12) break;
+      }
     }
 
     return Array.from(foundImages);
