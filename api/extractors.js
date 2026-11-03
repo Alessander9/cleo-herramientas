@@ -109,7 +109,8 @@ async function launchBrowser(extraArgs = []) {
   if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
     const chromiumMod = await import('@sparticuz/chromium');
     const chromium = chromiumMod.default || chromiumMod;
-    const puppeteerCore = require('puppeteer-core');
+    const puppeteerCoreMod = await import('puppeteer-core');
+    const puppeteerCore = puppeteerCoreMod.default || puppeteerCoreMod;
     return puppeteerCore.launch({
       args: [...chromium.args, '--disable-blink-features=AutomationControlled', ...extraArgs],
       defaultViewport: { width: 1366, height: 768 },
@@ -120,7 +121,8 @@ async function launchBrowser(extraArgs = []) {
 
   let puppeteer;
   try {
-    puppeteer = require('puppeteer');
+    const puppeteerMod = await import('puppeteer');
+    puppeteer = puppeteerMod.default || puppeteerMod;
   } catch (e) {
     throw new Error('Puppeteer no está instalado en el servidor.');
   }
