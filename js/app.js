@@ -255,9 +255,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const queue = [];
 
       for (const item of items) {
-        if (item.webkitGetAsEntry) {
-          const entry = item.webkitGetAsEntry();
-          if (entry) queue.push(traverseFileTree(entry));
+        const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+        if (entry) {
+          queue.push(traverseFileTree(entry));
         } else if (item.kind === 'file') {
           const f = item.getAsFile();
           if (f && isImageFile(f)) files.push(f);
@@ -270,7 +270,9 @@ document.addEventListener('DOMContentLoaded', () => {
           if (isImageFile(f)) files.push(f);
         });
       }
-    } else if (dt.files && dt.files.length > 0) {
+    }
+
+    if (files.length === 0 && dt.files && dt.files.length > 0) {
       Array.from(dt.files).forEach(f => {
         if (isImageFile(f)) files.push(f);
       });
