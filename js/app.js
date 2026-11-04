@@ -345,6 +345,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Paste Support (Ctrl+V)
   function handlePaste(e) {
+    if (viewPhotos && viewPhotos.style.display === 'none') return;
+    const activeTag = document.activeElement && document.activeElement.tagName;
+    if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
+
     const clipboardData = e.clipboardData || window.clipboardData;
     if (!clipboardData) return;
 
@@ -822,7 +826,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function escapeHtml(str) {
+    return String(str || '').replace(/[&<>"']/g, (ch) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    }[ch]));
+  }
+
   function createTableRowHtml(item, num) {
+    const safeName = escapeHtml(item.name);
     let savingBadgeHtml = `<span class="size-bold">-</span>`;
     let optSizeHtml = `<span class="size-bold">-</span>`;
     let statusHtml = `<span class="status-capsule status-pending">Pendiente</span>`;
@@ -846,11 +861,11 @@ document.addEventListener('DOMContentLoaded', () => {
         </td>
         <td class="th-num">${num}</td>
         <td class="th-thumb">
-          <img src="${item.previewUrl}" alt="${item.name}" class="table-preview-img" loading="lazy">
+          <img src="${item.previewUrl}" alt="${safeName}" class="table-preview-img" loading="lazy">
         </td>
         <td class="th-name">
           <div class="file-meta-stack">
-            <span class="file-name-line" title="${item.name}">${item.name}</span>
+            <span class="file-name-line" title="${safeName}">${safeName}</span>
             <span class="file-dims-line">${dimensions}</span>
           </div>
         </td>
@@ -889,6 +904,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function createCardHtml(item, num) {
+    const safeName = escapeHtml(item.name);
     let optText = '-';
     let savingBadge = '';
     let statusOrActions = '';
@@ -922,11 +938,11 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="photo-card" data-id="${item.id}">
         <div class="card-img-wrap">
           <input type="checkbox" class="cleo-chk row-chk card-chk" data-id="${item.id}" ${item.selected ? 'checked' : ''}>
-          <img src="${item.previewUrl}" alt="${item.name}" loading="lazy">
+          <img src="${item.previewUrl}" alt="${safeName}" loading="lazy">
           ${savingBadge}
         </div>
         <div class="card-body-info">
-          <div class="card-title" title="${item.name}">${item.name}</div>
+          <div class="card-title" title="${safeName}">${safeName}</div>
           <div class="card-stats-row">
             <span>${TurboCompressor.formatBytes(item.size)}</span>
             <span class="text-cyan font-bold">${optText}</span>

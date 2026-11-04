@@ -2,7 +2,7 @@
  * Cleo Herramientas - Service Worker (Offline Support & PWA Cache)
  */
 
-const CACHE_NAME = 'cleo-herramientas-v3.1';
+const CACHE_NAME = 'cleo-herramientas-v3.2';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -20,7 +20,7 @@ const ASSETS_TO_CACHE = [
   'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
   // Motor de compresión de video (WebCodecs): se descarga solo al abrir la pestaña Video.
   'https://cdn.jsdelivr.net/npm/mediabunny@1.61.3/dist/bundles/mediabunny.min.mjs',
-  'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap'
+  'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800;900&display=swap'
 ];
 
 // Install Event - cache core shell

@@ -346,6 +346,7 @@
       if (ext === 'jpeg' || ext === 'jfif') ext = 'jpg';
       if (ext === 'apng') ext = 'png';
       if (ext === 'tif') ext = 'tiff';
+      if (!ext && /googleusercontent\.com|ggpht\.com/i.test(u.hostname)) ext = 'jpg';
       return ext;
     }
 
@@ -355,6 +356,9 @@
 
     function fileNameFromUrl(u) {
       let seg = safeDecode(u.pathname.split('/').filter(Boolean).pop() || '');
+      if (/googleusercontent\.com|ggpht\.com/i.test(u.hostname)) {
+        seg = seg.replace(/=[ws]\d+.*$/i, '');
+      }
       seg = seg.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').trim();
       if (seg.length > 120) seg = seg.slice(-120);
       return seg || `${siteKey(u.hostname)}-imagen`;
@@ -382,6 +386,23 @@
 
       let pathname = cleanUrl.pathname;
       let score = Infinity;
+
+      // Google Maps / Google User Content (googleusercontent.com, ggpht.com): normalizar sufijos =w...-h... o =s0
+      if (/googleusercontent\.com|ggpht\.com/i.test(cleanUrl.hostname)) {
+        const whMatch = pathname.match(/=w(\d+)-h(\d+)/i);
+        const sMatch = pathname.match(/=s(\d+)/i);
+        if (whMatch) {
+          score = parseInt(whMatch[1], 10) * parseInt(whMatch[2], 10);
+        } else if (sMatch) {
+          const s = parseInt(sMatch[1], 10);
+          score = s === 0 ? Infinity : s * s;
+        }
+        const baseSeg = pathname.replace(/=[ws]\d+.*$/i, '');
+        return {
+          canonicalKey: ('gmaps-cdn://' + baseSeg).toLowerCase(),
+          score
+        };
+      }
 
       // Facebook / Instagram CDN (fbcdn.net, cdninstagram.com): agrupar por archivo y puntuar por resolución ctp/stp
       if (/fbcdn\.net|cdninstagram\.com/i.test(cleanUrl.hostname)) {
@@ -1088,7 +1109,7 @@
     }
 
     async function startSocialScan(startUrl, scan) {
-      els.statusText.textContent = 'Conectando con motor de Redes Sociales (gallery-dl)...';
+      els.statusText.textContent = 'Conectando con motor de Redes Sociales (Chromium / gallery-dl)...';
       els.pagesDone.textContent = '1';
       els.progressFill.style.width = '30%';
 
@@ -1512,7 +1533,20 @@
         </div>
       </div>`;
 
-    const VIA_LABELS = { img: 'Imagen', css: 'Fondo CSS', meta: 'Redes', icon: 'Ícono', link: 'Enlace', script: 'Script', sitemap: 'Sitemap' };
+    const VIA_LABELS = {
+      img: 'Imagen',
+      css: 'Fondo CSS',
+      meta: 'Redes',
+      icon: 'Ícono',
+      link: 'Enlace',
+      script: 'Script',
+      sitemap: 'Sitemap',
+      maps: 'Google Maps',
+      social: 'Red Social',
+      browser: 'Render JS',
+      import: 'Importada',
+      bookmarklet: 'Marcador'
+    };
 
     function updateCardDims(item, card) {
       const dims = card.querySelector('.scr-dims');
