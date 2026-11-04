@@ -2644,8 +2644,12 @@
         const urls = JSON.parse(rawImport);
         if (Array.isArray(urls) && urls.length > 0) {
           setTimeout(() => {
-            const scraperTabBtn = document.querySelector('[data-tab="scraper"]');
-            if (scraperTabBtn) scraperTabBtn.click();
+            if (window.CleoSwitchTool) {
+              window.CleoSwitchTool('scraper');
+            } else {
+              const scraperTabBtn = els.tab || document.querySelector('[data-tool="scraper"]');
+              if (scraperTabBtn) scraperTabBtn.click();
+            }
             clearResults();
             urls.forEach((u) => {
               addImage(u, u, 'bookmarklet', 'Marcador de navegador', 'Foto capturada');

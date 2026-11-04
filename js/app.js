@@ -199,7 +199,8 @@ document.addEventListener('DOMContentLoaded', () => {
         pill.classList.add('active');
         const fmt = pill.getAttribute('data-format');
         state.settings.format = fmt;
-        outputFormat.value = fmt;
+        if (outputFormat) outputFormat.value = fmt;
+        handleSettingChange();
       });
     });
   }
@@ -234,8 +235,18 @@ document.addEventListener('DOMContentLoaded', () => {
     dragCounter = 0;
     dropZone.classList.remove('drag-over');
 
+    if (document.body.classList.contains('tool-scraper')) return;
+
     const dt = e.dataTransfer;
     if (!dt) return;
+
+    if (document.body.classList.contains('tool-video')) {
+      if (e.target && e.target.closest && e.target.closest('#videoDropZone')) return;
+      if (window.CleoVideo && dt.files && dt.files.length > 0) {
+        window.CleoVideo.addFiles(dt.files);
+      }
+      return;
+    }
 
     const files = [];
 
@@ -263,13 +274,6 @@ document.addEventListener('DOMContentLoaded', () => {
       Array.from(dt.files).forEach(f => {
         if (isImageFile(f)) files.push(f);
       });
-    }
-
-    if (document.body.classList.contains('tool-video')) {
-      if (window.CleoVideo && dt.files && dt.files.length > 0) {
-        window.CleoVideo.addFiles(dt.files);
-      }
-      return;
     }
 
     if (files.length > 0) {
@@ -345,9 +349,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Paste Support (Ctrl+V)
   function handlePaste(e) {
-    if (viewPhotos && viewPhotos.style.display === 'none') return;
-    const activeTag = document.activeElement && document.activeElement.tagName;
-    if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
+    const isPhotos = !document.body.classList.contains('tool-video') && !document.body.classList.contains('tool-scraper');
+    if (!isPhotos) return;
+    const activeEl = document.activeElement;
+    const activeTag = activeEl && activeEl.tagName;
+    if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || (activeEl && activeEl.isContentEditable)) return;
 
     const clipboardData = e.clipboardData || window.clipboardData;
     if (!clipboardData) return;

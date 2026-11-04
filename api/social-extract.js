@@ -2,7 +2,7 @@
  * Cleo Herramientas - Endpoint Serverless para extracción de Redes Sociales (/api/social-extract)
  * Usa gallery-dl en local o Chromium Headless (@sparticuz/chromium) en Vercel.
  */
-const { runSocialExtract } = require('./extractors');
+const { validateTargetUrl, runSocialExtract } = require('./extractors');
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -13,11 +13,13 @@ module.exports = async function handler(req, res) {
     return res.end();
   }
 
-  const targetUrl = req.query && req.query.url;
-  if (!targetUrl || typeof targetUrl !== 'string') {
-    res.statusCode = 400;
+  let targetUrl;
+  try {
+    targetUrl = validateTargetUrl(req.query && req.query.url);
+  } catch (err) {
+    res.statusCode = err.status || 400;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    return res.end(JSON.stringify({ ok: false, error: 'Falta el parámetro url' }));
+    return res.end(JSON.stringify({ ok: false, error: err.message }));
   }
 
   const streamMode =
@@ -26,7 +28,9 @@ module.exports = async function handler(req, res) {
   const browser = (req.query && req.query.browser) || 'chrome';
 
   const ac = new AbortController();
-  req.on('close', () => ac.abort());
+  res.on('close', () => {
+    if (!res.writableEnded) ac.abort();
+  });
 
   if (streamMode) {
     res.writeHead(200, {

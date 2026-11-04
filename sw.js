@@ -2,7 +2,7 @@
  * Cleo Herramientas - Service Worker (Offline Support & PWA Cache)
  */
 
-const CACHE_NAME = 'cleo-herramientas-v3.2';
+const CACHE_NAME = 'cleo-herramientas-v3.3';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

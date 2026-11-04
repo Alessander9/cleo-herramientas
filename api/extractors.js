@@ -11,11 +11,49 @@ const { spawn } = require('child_process');
 const readline = require('readline');
 
 /**
+ * Valida que la URL objetivo sea una URL pública http/https (previene SSRF hacia localhost o redes internas).
+ */
+function validateTargetUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') {
+    throw Object.assign(new Error('Falta el parámetro url'), { status: 400 });
+  }
+  let parsed;
+  try {
+    parsed = new URL(rawUrl.trim());
+  } catch (e) {
+    throw Object.assign(new Error('URL no válida'), { status: 400 });
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw Object.assign(new Error('Sólo se permiten URLs http o https'), { status: 400 });
+  }
+  const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (
+    !host ||
+    host === 'localhost' ||
+    host === '0.0.0.0' ||
+    host === '::1' ||
+    host.startsWith('127.') ||
+    host.startsWith('10.') ||
+    host.startsWith('192.168.') ||
+    host.startsWith('169.254.') ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
+    host.endsWith('.localhost') ||
+    host.endsWith('.internal') ||
+    host.endsWith('.local')
+  ) {
+    throw Object.assign(new Error('Host no permitido'), { status: 403 });
+  }
+  return parsed.href;
+}
+
+/**
  * Extrae URLs de imágenes de redes sociales usando gallery-dl (local) o Chromium Headless (Vercel / fallback).
  */
-async function runSocialExtract(targetUrl, { browser = 'chrome', onImage, signal } = {}) {
+async function runSocialExtract(targetUrl, { browser = 'chrome', onImage, onUrl, signal } = {}) {
+  targetUrl = validateTargetUrl(targetUrl);
+  const emit = onImage || onUrl;
   if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
-    return runSocialBrowserExtract(targetUrl, { onImage, signal });
+    return runSocialBrowserExtract(targetUrl, { onImage: emit, signal });
   }
 
   return new Promise((resolve, reject) => {
@@ -37,7 +75,7 @@ async function runSocialExtract(targetUrl, { browser = 'chrome', onImage, signal
         onImage: (url) => {
           if (!foundImages.has(url)) {
             foundImages.add(url);
-            if (onImage) onImage(url);
+            if (emit) emit(url);
           }
         },
         signal
@@ -90,7 +128,7 @@ async function runSocialExtract(targetUrl, { browser = 'chrome', onImage, signal
           stdoutCount++;
           if (!foundImages.has(trimmed)) {
             foundImages.add(trimmed);
-            if (onImage) onImage(trimmed);
+            if (emit) emit(trimmed);
           }
         }
       });
@@ -433,7 +471,9 @@ async function launchBrowser(extraArgs = []) {
 /**
  * Extrae URLs de imágenes de sitios SPA modernos usando Puppeteer y scroll dinámico.
  */
-async function runBrowserExtract(targetUrl, { maxScrolls = 8, onImage, signal } = {}) {
+async function runBrowserExtract(targetUrl, { maxScrolls = 8, onImage, onUrl, signal } = {}) {
+  targetUrl = validateTargetUrl(targetUrl);
+  const emit = onImage || onUrl;
   const foundImages = new Set();
   const reportImage = (url) => {
     if (!url || typeof url !== 'string') return;
@@ -441,7 +481,7 @@ async function runBrowserExtract(targetUrl, { maxScrolls = 8, onImage, signal } 
     if (!/^https?:\/\//i.test(clean) || clean.startsWith('data:') || clean.startsWith('blob:')) return;
     if (!foundImages.has(clean)) {
       foundImages.add(clean);
-      if (onImage) onImage(clean);
+      if (emit) emit(clean);
     }
   };
 
@@ -483,11 +523,11 @@ async function runBrowserExtract(targetUrl, { maxScrolls = 8, onImage, signal } 
     for (let i = 0; i < maxScrolls; i++) {
       if (signal && signal.aborted) break;
 
-      const newUrls = await page.evaluate(async () => {
+      await page.evaluate(async () => {
         window.scrollBy(0, window.innerHeight * 1.5);
         await new Promise((r) => setTimeout(r, 1200));
-        return extractDomImages();
       });
+      const newUrls = await page.evaluate(extractDomImages);
 
       newUrls.forEach(reportImage);
     }
@@ -563,13 +603,15 @@ function normalizeGooglePhoto(url) {
 /**
  * Extrae fotos en alta resolución de una ubicación o ficha de Google Maps.
  */
-async function runGoogleMapsExtract(targetUrl, { maxScrolls = 35, onImage, signal } = {}) {
+async function runGoogleMapsExtract(targetUrl, { maxScrolls = 35, onImage, onUrl, signal } = {}) {
+  targetUrl = validateTargetUrl(targetUrl);
+  const emit = onImage || onUrl;
   const foundImages = new Set();
   const reportImage = (url) => {
     const hiRes = normalizeGooglePhoto(url);
     if (hiRes && !foundImages.has(hiRes)) {
       foundImages.add(hiRes);
-      if (onImage) onImage(hiRes);
+      if (emit) emit(hiRes);
     }
   };
 
@@ -754,6 +796,7 @@ async function runGoogleMapsExtract(targetUrl, { maxScrolls = 35, onImage, signa
 }
 
 module.exports = {
+  validateTargetUrl,
   runSocialExtract,
   runBrowserExtract,
   runGoogleMapsExtract
